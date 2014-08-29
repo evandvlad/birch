@@ -35,6 +35,8 @@
     Lexer.RE_SPACES = /[\r\t\n]/g;
     Lexer.RE_COMMON_LEX = /^(\S+)(?:\s*)(.*?)$/;
     Lexer.RE_SQUARE_BRACKETS = /\[([^\]]+)\]/g;
+    Lexer.RE_F_CALL = /^([^(]+)?(\(.+)+$/;
+    Lexer.RE_FNS_ARGS = /\((.*?)\)/g;
 
     Lexer.LEX_TYPE_EMPTY = 1;
     Lexer.LEX_TYPE_PRINT = 2;
@@ -51,18 +53,24 @@
     Lexer.TOKEN_OP_EACH = '^';
     Lexer.TOKEN_OP_END_EACH = '/^';
 
+    // PRINT_OPER = "="
+    // IF_OPER = "?"
+    // ELSE_OPER = "!"
+    // END_IF_OPER = "/?"
+    // EACH_OPER = "^"
+    // END_EACH_OPER = "/^"
 
-    // PRINT_OPER = =
-    // IF_OPER = ?
-    // ELSE_OPER = !
-    // END_IF_OPER = /?
-    // EACH_OPER = ^
-    // END_EACH_OPER = /^
+    // IDENT = Char{Char | Digit | "_"}
+    // PROP = "[" IDENT "]" | "." IDENT
+    // METH = "("{VAR{"," VAR}}")"
+    // VAR = IDENT{PROP | METH}
 
-    // VAR_PROP = [name] | .name
-    // VAR = name | nameVAR_PROP{VAR_PROP}
-
-    // FUNC_CALL = VAR"("{VAR{"," VAR}}")"
+    // PRINT = PRINT_OPER VAR
+    // IF = IF_OPER VAR
+    // ELSE = ELSE_OPER
+    // END_IF = END_IF_OPER
+    // EACH = VAR "->" "(" IDENT {"," IDENT}")"
+    // END_EACH = END_EACH_OPER
 
     Lexer.prototype = {
 
@@ -77,15 +85,15 @@
         },
 
         _getLexem : function(isPlainText, value){
-            var lexData = {},
+            var data = {},
                 match,
                 op,
                 body;
 
             if(isPlainText){
-                lexData.lexType = Lexer.LEX_TYPE_EMPTY;
-                lexData.code = constf(value);
-                return lexData;
+                data.type = Lexer.LEX_TYPE_EMPTY;
+                data.code = constf(value);
+                return data;
             }
 
             match = value.trim().match(Lexer.RE_COMMON_LEX);
@@ -99,59 +107,107 @@
 
             switch(op){
                 case Lexer.TOKEN_OP_PRINT :
-                    lexData.lexType = Lexer.LEX_TYPE_PRINT;
-                    lexData.code = (function(v){
-                        var parts;
-
-                        if(!v){
-                            throw new Error('expected variable name');
-                        }
-
-                        parts = v.replace(Lexer.RE_SQUARE_BRACKETS, '.$1').split('.');
-
-                        return function(scope){
-                            var pts = parts.slice(),
-                                ctx = scope;
-
-                            while(pts.length && !isNullOrUndefined(ctx)){
-                                ctx = ctx[pts.shift()];
-                            }
-
-                            return isNullOrUndefined(ctx) ? '' : ctx;
-                        };
-                    }(body));
+                    data.type = Lexer.LEX_TYPE_PRINT;
+                    data.code = this._genCodeForVar(body);
                     break;
 
                 case Lexer.TOKEN_OP_IF :
-                    lexData.lexType = Lexer.LEX_TYPE_IF;
-                    lexData.code = constf('');
+                    data.type = Lexer.LEX_TYPE_IF;
+                    data.code = this._genCodeForCond(body);
                     break;
 
                 case Lexer.TOKEN_OP_ELSE :
-                    lexData.lexType = Lexer.LEX_TYPE_ELSE;
-                    lexData.code = constf('');
+                    data.type = Lexer.LEX_TYPE_ELSE;
+                    data.code = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_END_IF :
-                    lexData.lexType = Lexer.LEX_TYPE_END_IF;
-                    lexData.code = constf('');
+                    data.type = Lexer.LEX_TYPE_END_IF;
+                    data.code = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_EACH :
-                    lexData.lexType = Lexer.LEX_TYPE_EACH;
-                    lexData.code = constf('');
+                    data.type = Lexer.LEX_TYPE_EACH;
+                    data.code = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_END_EACH :
-                    lexData.lexType = Lexer.LEX_TYPE_END_EACH;
-                    lexData.code = constf('');
+                    data.type = Lexer.LEX_TYPE_END_EACH;
+                    data.code = constf('');
                     break;
 
                 default :
                     throw new Error('incorrect token of lexem operator: ' + op);
             }
 
-            return lexData;
+            return data;
+        },
+
+        _genCodeForVar : function(v){
+            var self = this,
+                parts;
+
+            if(!v){
+                throw new Error('expected variable name');
+            }
+
+
+            parts = this._varToParts(v);
+
+            return function(scope){
+                var pts = parts.slice(),
+                    ctx = scope,
+                    pt;
+
+                while(pts.length && !isNullOrUndefined(ctx)){
+                    pt = pts.shift();
+                    ctx = pt.evaluated ? ctx.apply(null, pt.data.map(function(arg){
+                        return self._genCodeForVar(arg)(scope);
+                    })) : ctx[pt.data];
+                }
+
+                return isNullOrUndefined(ctx) ? '' : ctx;
+            };
+        },
+
+        _genCodeForCond : function(v){
+            var codeForVar = this._genCodeForVar(v);
+
+            return function(scope){
+                return !!codeForVar(scope);
+            };
+        },
+
+        _varToParts : function(str){
+            return str.replace(Lexer.RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, part){
+                var match = part.match(Lexer.RE_F_CALL);
+
+                if(match){
+                    match[1] && acc.push({
+                        evaluated : false,
+                        data : match[1]
+                    });
+
+                    match[2] && match[2].replace(Lexer.RE_FNS_ARGS, function(all, v){
+                        acc.push({
+                            evaluated : true,
+                            data : v.trim().split(',').reduce(function(acc, arg){
+                                arg = arg.trim();
+                                arg && acc.push(arg);
+                                return acc;
+                            }, [])
+                        })
+                    });
+                }
+                else{
+                    acc.push({
+                        evaluated : false,
+                        data : part
+                    });
+                }
+
+                return acc;
+            }, []);
         }
     };
 

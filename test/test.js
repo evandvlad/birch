@@ -71,6 +71,39 @@ describe('birch', function(){
             assert.equal(birch.compile('<div>{{= test }} {{= test }}</div>')({
                 'test' : "{{}}"
             }), '<div>{{}} {{}}</div>');
-        })
+        });
+
+        it('print method call', function(){
+            assert.equal(birch.compile('<div>{{= test() }} {{= test() }}</div>')({
+                'test' : function(){
+                    return 'ok';
+                }
+            }), '<div>ok ok</div>');
+        });
+
+        it('print method call in chain', function(){
+            assert.equal(birch.compile('<div>{{= test()().inner()[0] }} {{= m[0]().data }}</div>')({
+                'test' : function(){
+                    return function(){
+                        return {
+                            inner : function(){
+                                return ['ok'];
+                            }
+                        };
+                    };
+                },
+                m : [function(){return {data : 'ok'}}]
+            }), '<div>ok ok</div>');
+        });
+
+        it('print method call with arguments', function(){
+            assert.equal(birch.compile('<div>{{= test(a, b) }}</div>')({
+                'test' : function(a, b){
+                    return a + b;
+                },
+                a : 'a',
+                b : 'b'
+            }), '<div>ab</div>');
+        });
     });
 });
