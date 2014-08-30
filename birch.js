@@ -16,7 +16,20 @@
 
     'use strict';
 
-    var birch;
+    var RE_SPACES = /[\r\t\n]/g,
+        RE_SQUARE_BRACKETS = /\[([^\]]+)\]/g,
+        RE_HTML_ESC = /[&<>"'\/]/g,
+
+        SAFE_HTML_MAP = {
+            '&' : '&amp;',
+            '<' : '&lt;',
+            '>' : '&gt;',
+            '"' : '&quot;',
+            "'" : '&#39;',
+            '/' : '&#x2F;'
+        },
+
+        birch;
 
     function constf(v){
         return function(){
@@ -28,78 +41,85 @@
         return typeof v === 'undefined' || v === null;
     }
 
-    function Lexer(str, delemiter){
-        this.lexems = this._toLexems(str, delemiter);
+    function toSafeHtml(html){
+        return html.replace(RE_HTML_ESC, function(ch){
+            return SAFE_HTML_MAP[ch];
+        });
     }
 
-    Lexer.RE_SPACES = /[\r\t\n]/g;
-    Lexer.RE_COMMON_LEX = /^(\S+)(?:\s*)(.*?)$/;
-    Lexer.RE_SQUARE_BRACKETS = /\[([^\]]+)\]/g;
-    Lexer.RE_F_CALL = /^([^(]+)?(\(.+)+$/;
-    Lexer.RE_FNS_ARGS = /\((.*?)\)/g;
+    function Lexer(pattern, delimiter){
+        this.tags = this._toTags(pattern, delimiter);
+    }
 
-    Lexer.LEX_TYPE_EMPTY = 1;
-    Lexer.LEX_TYPE_PRINT = 2;
-    Lexer.LEX_TYPE_IF = 3;
-    Lexer.LEX_TYPE_ELSE = 4;
-    Lexer.LEX_TYPE_END_IF = 5;
-    Lexer.LEX_TYPE_EACH = 6;
-    Lexer.LEX_TYPE_END_EACH = 7;
+    Lexer.RE_COMMON_TAG = /^(\S+)(?:\s*)(.*?)$/;
+
+    Lexer.TAG_TYPE_NULL = 1;
+    Lexer.TAG_TYPE_PRINT = 2;
+    Lexer.TAG_TYPE_SAFE_PRINT = 3;
+    Lexer.TAG_TYPE_IF = 4;
+    Lexer.TAG_TYPE_ELSE = 5;
+    Lexer.TAG_TYPE_END_IF = 6;
+    Lexer.TAG_TYPE_EACH = 7;
+    Lexer.TAG_TYPE_END_EACH = 8;
 
     Lexer.TOKEN_OP_PRINT = '=';
+    Lexer.TOKEN_OP_SAFE_PRINT = '~';
     Lexer.TOKEN_OP_IF = '?';
     Lexer.TOKEN_OP_ELSE = '!';
     Lexer.TOKEN_OP_END_IF = '/?';
     Lexer.TOKEN_OP_EACH = '^';
     Lexer.TOKEN_OP_END_EACH = '/^';
+    Lexer.TOKEN_METH_CALL = '()';
 
     // PRINT_OPER = "="
+    // SAFE_PRINT_OPER = "~"
     // IF_OPER = "?"
     // ELSE_OPER = "!"
     // END_IF_OPER = "/?"
     // EACH_OPER = "^"
     // END_EACH_OPER = "/^"
 
-    // IDENT = Char{Char | Digit | "_"}
-    // PROP = "[" IDENT "]" | "." IDENT
-    // METH = "("{VAR{"," VAR}}")"
-    // VAR = IDENT{PROP | METH}
+    // VAR = Char{Char | Digit | "_"}
+    // PROP = "[" VAR "]" | "." VAR
+    // METH = "()"
+    // GETTER = VAR{PROP | METH}
 
-    // PRINT = PRINT_OPER VAR
-    // IF = IF_OPER VAR
+    // PRINT = PRINT_OPER GETTER
+    // SAFE_PRINT = SAFE_PRINT_OPER GETTER
+    // IF = IF_OPER GETTER
     // ELSE = ELSE_OPER
     // END_IF = END_IF_OPER
-    // EACH = VAR "->" "(" IDENT {"," IDENT}")"
+    // EACH = GETTER "->" "(" VAR {"," VAR}")"
     // END_EACH = END_EACH_OPER
 
     Lexer.prototype = {
 
         constructor : Lexer,
 
-        _toLexems : function(str, delimiter){
-            return str.replace(Lexer.RE_SPACES, ' ').split(delimiter).reduce(function(acc, v, i){
+        _toTags : function(str, delimiter){
+            return str.replace(RE_SPACES, ' ').split(delimiter).reduce(function(acc, tag, i){
                 var isPlainText = !(i % 2);
-                !(isPlainText && !v) && acc.push(this._getLexem(isPlainText, v));
+                !(isPlainText && !tag) && acc.push(this._parseTag(isPlainText, tag));
                 return acc;
             }.bind(this), []);
         },
 
-        _getLexem : function(isPlainText, value){
+        _parseTag : function(isPlainText, value){
             var data = {},
                 match,
                 op,
                 body;
 
             if(isPlainText){
-                data.type = Lexer.LEX_TYPE_EMPTY;
+                data.type = Lexer.TAG_TYPE_NULL;
                 data.code = constf(value);
                 return data;
             }
 
-            match = value.trim().match(Lexer.RE_COMMON_LEX);
+            match = value.trim().match(Lexer.RE_COMMON_TAG);
 
             if(match === null){
-                throw new Error('incorrect lexem: ' + value);
+                throw new Error('incorrect tag: ' + value);
             }
 
             op = match[1];
@@ -107,104 +127,95 @@
 
             switch(op){
                 case Lexer.TOKEN_OP_PRINT :
-                    data.type = Lexer.LEX_TYPE_PRINT;
-                    data.code = this._genCodeForVar(body);
+                    data.type = Lexer.TAG_TYPE_PRINT;
+                    data.code = this._genCodeForGetter(body);
+                    break;
+
+                case Lexer.TOKEN_OP_SAFE_PRINT :
+                    data.type = Lexer.TAG_TYPE_SAFE_PRINT;
+                    data.code = this._genCodeForSafeGetter(body);
                     break;
 
                 case Lexer.TOKEN_OP_IF :
-                    data.type = Lexer.LEX_TYPE_IF;
+                    data.type = Lexer.TAG_TYPE_IF;
                     data.code = this._genCodeForCond(body);
                     break;
 
                 case Lexer.TOKEN_OP_ELSE :
-                    data.type = Lexer.LEX_TYPE_ELSE;
+                    data.type = Lexer.TAG_TYPE_ELSE;
                     data.code = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_END_IF :
-                    data.type = Lexer.LEX_TYPE_END_IF;
+                    data.type = Lexer.TAG_TYPE_END_IF;
                     data.code = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_EACH :
-                    data.type = Lexer.LEX_TYPE_EACH;
+                    data.type = Lexer.TAG_TYPE_EACH;
                     data.code = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_END_EACH :
-                    data.type = Lexer.LEX_TYPE_END_EACH;
+                    data.type = Lexer.TAG_TYPE_END_EACH;
                     data.code = constf('');
                     break;
 
                 default :
-                    throw new Error('incorrect token of lexem operator: ' + op);
+                    throw new Error('operation: ' + op + ' not supported');
             }
 
             return data;
         },
 
-        _genCodeForVar : function(v){
-            var self = this,
-                parts;
+        _genCodeForGetter : function(value){
+            var chunks;
 
-            if(!v){
-                throw new Error('expected variable name');
+            if(!value){
+                throw new Error('getter value is empty');
             }
 
-
-            parts = this._varToParts(v);
+            chunks = this._getterToChunks(value);
 
             return function(scope){
-                var pts = parts.slice(),
+                var chnks = chunks.slice(),
                     ctx = scope,
-                    pt;
+                    chunk;
 
-                while(pts.length && !isNullOrUndefined(ctx)){
-                    pt = pts.shift();
-                    ctx = pt.evaluated ? ctx.apply(null, pt.data.map(function(arg){
-                        return self._genCodeForVar(arg)(scope);
-                    })) : ctx[pt.data];
+                while(chnks.length && !isNullOrUndefined(ctx)){
+                    chunk = chnks.shift();
+                    ctx = chunk.isEvl ? ctx.call(scope) : ctx[chunk.value];
                 }
 
                 return isNullOrUndefined(ctx) ? '' : ctx;
             };
         },
 
-        _genCodeForCond : function(v){
-            var codeForVar = this._genCodeForVar(v);
+        _genCodeForSafeGetter : function(value){
+            var getter = this._genCodeForGetter(value);
 
             return function(scope){
-                return !!codeForVar(scope);
+                return toSafeHtml(getter(scope));
             };
         },
 
-        _varToParts : function(str){
-            return str.replace(Lexer.RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, part){
-                var match = part.match(Lexer.RE_F_CALL);
+        _genCodeForCond : function(value){
+            var getter = this._genCodeForGetter(value);
 
-                if(match){
-                    match[1] && acc.push({
-                        evaluated : false,
-                        data : match[1]
-                    });
+            return function(scope){
+                return !!getter(scope);
+            };
+        },
 
-                    match[2] && match[2].replace(Lexer.RE_FNS_ARGS, function(all, v){
-                        acc.push({
-                            evaluated : true,
-                            data : v.trim().split(',').reduce(function(acc, arg){
-                                arg = arg.trim();
-                                arg && acc.push(arg);
-                                return acc;
-                            }, [])
-                        })
-                    });
-                }
-                else{
-                    acc.push({
-                        evaluated : false,
-                        data : part
-                    });
-                }
+        _getterToChunks : function(value){
+            return value.replace(RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, chunk){
+                chunk.indexOf(Lexer.TOKEN_METH_CALL) !== -1 ?
+
+                    chunk.split(Lexer.TOKEN_METH_CALL).forEach(function(chnk){
+                        acc.push({isEvl : !chnk, value : chnk});
+                    }) :
+
+                    acc.push({isEvl : false, value : chunk});
 
                 return acc;
             }, []);
@@ -220,8 +231,8 @@
         constructor : Parser,
 
         translate : function(scope){
-            return this.lexer.lexems.reduce(function(acc, lx){
-                return acc += lx.code(scope);
+            return this.lexer.tags.reduce(function(acc, tag){
+                return acc += tag.code(scope);
             }, '');
         }
     };
