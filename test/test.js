@@ -100,4 +100,48 @@ describe('birch', function(){
             v : '& another <i>"string"\'</i>'
         }), 'string &amp; another &lt;i&gt;&quot;string&quot;&#39;&lt;&#x2F;i&gt;');
     });
+
+    it('if true prop', function(){
+        assert.equal(birch.compile('{{? test }}true{{/?}}')({
+            test : true
+        }), 'true');
+    });
+
+    it('if true method', function(){
+        assert.equal(birch.compile('{{? test.a() }}true{{/?}}')({
+            test : {
+                a : function(){
+                    return true;
+                }
+            }
+        }), 'true');
+    });
+
+    it('if value to true', function(){
+        assert.equal(birch.compile('{{? test.a() }}true{{/?}}')({
+            test : {
+                a : function(){
+                    return 'some string';
+                }
+            }
+        }), 'true');
+    });
+
+    it('if false', function(){
+        assert.equal(birch.compile('{{? test }}true{{/?}}')({
+            test : null
+        }), '');
+    });
+
+    it('if / else true', function(){
+        assert.equal(birch.compile('{{? test }}true{{!}}false{{/?}}')({
+            test : 1
+        }), 'true');
+    });
+
+    it('if / else false', function(){
+        assert.equal(birch.compile('{{? test }}true{{!}}false{{/?}}')({
+            test : null
+        }), 'false');
+    });
 });

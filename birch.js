@@ -20,6 +20,15 @@
         RE_SQUARE_BRACKETS = /\[([^\]]+)\]/g,
         RE_HTML_ESC = /[&<>"'\/]/g,
 
+        TAG_TYPE_NULL = 1,
+        TAG_TYPE_PRINT = 2,
+        TAG_TYPE_SAFE_PRINT = 3,
+        TAG_TYPE_IF = 4,
+        TAG_TYPE_ELSE = 5,
+        TAG_TYPE_END_IF = 6,
+        TAG_TYPE_EACH = 7,
+        TAG_TYPE_END_EACH = 8,
+
         SAFE_HTML_MAP = {
             '&' : '&amp;',
             '<' : '&lt;',
@@ -29,12 +38,30 @@
             '/' : '&#x2F;'
         },
 
+        CondTreeItem,
+
         birch;
 
     function constf(v){
         return function(){
             return v;
         };
+    }
+
+    function inherit(Parent, ext){
+        var Ctor = Object.hasOwnProperty.call(ext, 'constructor') ?
+            ext.constructor :
+            function(){
+                Parent.apply(this, arguments);
+            };
+
+        Ctor.prototype = Object.create(Parent.prototype);
+
+        Object.keys(ext).forEach(function(prop){
+            Ctor.prototype[prop] = ext[prop];
+        });
+
+        return Ctor;
     }
 
     function isNullOrUndefined(v){
@@ -52,15 +79,6 @@
     }
 
     Lexer.RE_COMMON_TAG = /^(\S+)(?:\s*)(.*?)$/;
-
-    Lexer.TAG_TYPE_NULL = 1;
-    Lexer.TAG_TYPE_PRINT = 2;
-    Lexer.TAG_TYPE_SAFE_PRINT = 3;
-    Lexer.TAG_TYPE_IF = 4;
-    Lexer.TAG_TYPE_ELSE = 5;
-    Lexer.TAG_TYPE_END_IF = 6;
-    Lexer.TAG_TYPE_EACH = 7;
-    Lexer.TAG_TYPE_END_EACH = 8;
 
     Lexer.TOKEN_OP_PRINT = '=';
     Lexer.TOKEN_OP_SAFE_PRINT = '~';
@@ -96,6 +114,10 @@
 
         constructor : Lexer,
 
+        getTags : function(){
+            return this.tags;
+        },
+
         _toTags : function(str, delimiter){
             return str.replace(RE_SPACES, ' ').split(delimiter).reduce(function(acc, tag, i){
                 var isPlainText = !(i % 2);
@@ -111,8 +133,8 @@
                 body;
 
             if(isPlainText){
-                data.type = Lexer.TAG_TYPE_NULL;
-                data.code = constf(value);
+                data.type = TAG_TYPE_NULL;
+                data.execute = constf(value);
                 return data;
             }
 
@@ -127,38 +149,38 @@
 
             switch(op){
                 case Lexer.TOKEN_OP_PRINT :
-                    data.type = Lexer.TAG_TYPE_PRINT;
-                    data.code = this._genCodeForGetter(body);
+                    data.type = TAG_TYPE_PRINT;
+                    data.execute = this._genCodeForGetter(body);
                     break;
 
                 case Lexer.TOKEN_OP_SAFE_PRINT :
-                    data.type = Lexer.TAG_TYPE_SAFE_PRINT;
-                    data.code = this._genCodeForSafeGetter(body);
+                    data.type = TAG_TYPE_SAFE_PRINT;
+                    data.execute = this._genCodeForSafeGetter(body);
                     break;
 
                 case Lexer.TOKEN_OP_IF :
-                    data.type = Lexer.TAG_TYPE_IF;
-                    data.code = this._genCodeForCond(body);
+                    data.type = TAG_TYPE_IF;
+                    data.execute = this._genCodeForCond(body);
                     break;
 
                 case Lexer.TOKEN_OP_ELSE :
-                    data.type = Lexer.TAG_TYPE_ELSE;
-                    data.code = constf('');
+                    data.type = TAG_TYPE_ELSE;
+                    data.execute = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_END_IF :
-                    data.type = Lexer.TAG_TYPE_END_IF;
-                    data.code = constf('');
+                    data.type = TAG_TYPE_END_IF;
+                    data.execute = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_EACH :
-                    data.type = Lexer.TAG_TYPE_EACH;
-                    data.code = constf('');
+                    data.type = TAG_TYPE_EACH;
+                    data.execute = constf('');
                     break;
 
                 case Lexer.TOKEN_OP_END_EACH :
-                    data.type = Lexer.TAG_TYPE_END_EACH;
-                    data.code = constf('');
+                    data.type = TAG_TYPE_END_EACH;
+                    data.execute = constf('');
                     break;
 
                 default :
@@ -222,6 +244,66 @@
         }
     };
 
+    function TreeItem(parent, data){
+        this.data = data;
+        this.parent = parent;
+        this.children = [];
+        parent && parent.addChild(this);
+    }
+
+    TreeItem.prototype = {
+
+        constructor : TreeItem,
+
+        addChild : function(child){
+            this.children.push(child);
+            return this;
+        },
+
+        getParent : function(){
+            return this.parent;
+        },
+
+        execute : function(scope){
+            return this.children.reduce(function(acc, child){
+                return acc += child.execute(scope);
+            }, '');
+        }
+    };
+
+    CondTreeItem = inherit(TreeItem, {
+
+        constructor : function(){
+            TreeItem.apply(this, arguments);
+            this.elseSp = -1;
+        },
+
+        addChild : function(child){
+            child.type === TAG_TYPE_ELSE ?
+                (this.elseSp = this.children.length) :
+                TreeItem.prototype.addChild.apply(this, arguments);
+
+            return this;
+        },
+
+        execute : function(scope){
+            var isTrueCond = this.data.execute(scope),
+                children;
+
+            if(!isTrueCond && this.elseSp === -1){
+                return '';
+            }
+
+            children = isTrueCond ?
+                this.children.slice(0, this.elseSp === -1 ? this.children.length : this.elseSp) :
+                this.children.slice(this.elseSp);
+
+            return children.reduce(function(acc, child){
+                return acc += child.execute(scope);
+            }, '');
+        }
+    });
+
     function Parser(lexer){
         this.lexer = lexer;
     }
@@ -231,9 +313,24 @@
         constructor : Parser,
 
         translate : function(scope){
-            return this.lexer.tags.reduce(function(acc, tag){
-                return acc += tag.code(scope);
-            }, '');
+            return this.lexer
+                .getTags()
+                .reduce(this._foldTree, new TreeItem(null, null))
+                .execute(scope);
+        },
+
+        _foldTree : function(treeItem, tag){
+            switch(tag.type){
+                case TAG_TYPE_IF :
+                    return new CondTreeItem(treeItem, tag);
+
+                case TAG_TYPE_END_IF :
+                    return treeItem.getParent();
+
+                default :
+                    treeItem.addChild(tag);
+                    return treeItem;
+            }
         }
     };
 
