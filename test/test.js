@@ -192,4 +192,28 @@ describe('birch', function(){
             b : 0
         }), '');
     });
+
+    it('if & immediately else', function(){
+        var tmpl = '{{? test }}{{!}}else{{/?}}';
+
+        assert.equal(birch.compile(tmpl)({
+            test : true
+        }), '');
+
+        assert.equal(birch.compile(tmpl)({
+            test : false
+        }), 'else');
+    });
+
+    it('else & immediately end', function(){
+        var tmpl = '{{? test }}if{{!}}{{/?}}';
+
+        assert.equal(birch.compile(tmpl)({
+            test : true
+        }), 'if');
+
+        assert.equal(birch.compile(tmpl)({
+            test : false
+        }), '');
+    });
 });

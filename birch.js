@@ -16,27 +16,6 @@
 
     'use strict';
 
-    var RE_SPACES = /[\r\t\n]/g,
-        RE_SQUARE_BRACKETS = /\[([^\]]+)\]/g,
-        RE_HTML_ESC = /[&<>"'\/]/g,
-
-        SAFE_HTML_MAP = {
-            '&' : '&amp;',
-            '<' : '&lt;',
-            '>' : '&gt;',
-            '"' : '&quot;',
-            "'" : '&#39;',
-            '/' : '&#x2F;'
-        },
-
-        birch;
-
-    function constf(v){
-        return function(){
-            return v;
-        };
-    }
-
     function inherit(Parent, ext){
         var Ctor = Object.hasOwnProperty.call(ext, 'constructor') ?
             ext.constructor :
@@ -53,14 +32,12 @@
         return Ctor;
     }
 
-    function isNullOrUndefined(v){
-        return typeof v === 'undefined' || v === null;
+    function isNull(v){
+        return v === null;
     }
 
-    function toSafeHtml(html){
-        return html.replace(RE_HTML_ESC, function(ch){
-            return SAFE_HTML_MAP[ch];
-        });
+    function isNullOrUndefined(v){
+        return typeof v === 'undefined' || isNull(v);
     }
 
     function Instruction(data){
@@ -72,8 +49,13 @@
     Instruction.prototype = {
 
         addComponent : function(component){
-            component.parent = this;
+            component.setParent(this);
             this.components.push(component);
+            return this;
+        },
+
+        setParent : function(parent){
+            this.parent = parent;
             return this;
         },
 
@@ -87,10 +69,65 @@
     };
 
     function Parser(pattern, tag){
-        this.tree = this._getTree(pattern, tag);
+        this.tree = this._compile(pattern, tag);
     }
 
+    Parser.prototype = {
+
+        constructor : Parser,
+
+        translate : function(scope){
+            return this.tree.evaluate(scope);
+        },
+
+        _compile : function(str, delimiter){
+            return str.replace(Parser.RE_SPACES, ' ').split(delimiter).reduce(function(acc, expr, i){
+                var isPlainText = !(i % 2);
+                return (isPlainText && !expr) ? acc : this._insertInstruction(acc, expr);
+            }.bind(this),  new Parser.RootInstruction());
+        },
+
+        _insertInstruction : function(parentInstr, expr){
+            var match = expr.trim().match(Parser.RE_EXPR),
+                isMatch = !isNull(match),
+                operation = isMatch ? match[1] : null,
+                body = isMatch ? match[2] : expr,
+                instr;
+
+            switch(operation){
+                case Parser.TOKEN_OPERATION_PRINT :
+                    parentInstr.addComponent(new Parser.ValInstruction(body));
+                    return parentInstr;
+
+                case Parser.TOKEN_OPERATION_SAFE_PRINT :
+                    parentInstr.addComponent(new Parser.SafeValInstruction(body));
+                    return parentInstr;
+
+                case Parser.TOKEN_OPERATION_IF :
+                    instr = new Parser.ConditionalInstruction(body);
+                    parentInstr.addComponent(instr);
+                    return instr;
+
+                case Parser.TOKEN_OPERATION_ELSE :
+                    parentInstr.setElsePointer();
+                    return parentInstr;
+
+                case Parser.TOKEN_OPERATION_END_IF :
+                case Parser.TOKEN_OPERATION_END_EACH :
+                    return parentInstr.getParent();
+//
+//                case Parser.TOKEN_OPERATION_EACH :
+//                    return {type : Parser.EXPR_TYPE_EACH, value : body};
+
+                default :
+                    parentInstr.addComponent(new Parser.IdInstruction(expr));
+                    return parentInstr;
+            }
+        }
+    };
+
     Parser.RE_EXPR = /^(\S+)(?:\s*)(.*?)$/;
+    Parser.RE_SPACES = /[\r\t\n]/g;
 
     Parser.TOKEN_OPERATION_PRINT = '=';
     Parser.TOKEN_OPERATION_SAFE_PRINT = '~';
@@ -114,7 +151,6 @@
         evaluate : function(scope){
             return this.data || '';
         }
-
     });
 
     Parser.ConditionalInstruction = inherit(Instruction, {
@@ -133,12 +169,12 @@
             var isTrueCond = !!(new Parser.ValInstruction(this.data).evaluate(scope)),
                 components;
 
-            if(!isTrueCond && this.pointerElse === null){
+            if(!isTrueCond && isNull(this.pointerElse)){
                 return '';
             }
 
             components = isTrueCond ?
-                this.components.slice(0, this.pointerElse === null ? this.components.length : this.pointerElse) :
+                this.components.slice(0, isNull(this.pointerElse) ? this.components.length : this.pointerElse) :
                 this.components.slice(this.pointerElse);
 
             return components.reduce(function(acc, component){
@@ -149,6 +185,8 @@
 
     Parser.ValInstruction = inherit(Instruction, {
 
+        RE_SQUARE_BRACKETS : /\[([^\]]+)\]/g,
+
         constructor : function(){
             var TOKEN_METHOD_CALL = '()';
 
@@ -158,7 +196,7 @@
                 throw new Error('value is empty');
             }
 
-            this.chunks = this.data.replace(RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, chunk){
+            this.chunks = this.data.replace(this.RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, chunk){
                 chunk.indexOf(TOKEN_METHOD_CALL) !== -1 ?
 
                     chunk.split(TOKEN_METHOD_CALL).forEach(function(chnk){
@@ -187,86 +225,40 @@
 
     Parser.SafeValInstruction = inherit(Parser.ValInstruction, {
 
+        RE_HTML_ESC : /[&<>"'\/]/g,
+
+        SAFE_HTML_MAP : {
+            '&' : '&amp;',
+            '<' : '&lt;',
+            '>' : '&gt;',
+            '"' : '&quot;',
+            "'" : '&#39;',
+            '/' : '&#x2F;'
+        },
+
         evaluate : function(scope){
-            return toSafeHtml(Parser.ValInstruction.prototype.evaluate.call(this, scope));
+            return this._toSafeHtml(Parser.ValInstruction.prototype.evaluate.call(this, scope));
+        },
+
+        _toSafeHtml : function(value){
+            return value.replace(this.RE_HTML_ESC, function(ch){
+                return this.SAFE_HTML_MAP[ch];
+            }.bind(this));
         }
     });
 
-    Parser.prototype = {
-
-        constructor : Parser,
-
-        translate : function(scope){
-            return this.tree.evaluate(scope);
-        },
-
-        _getTree : function(str, delimiter){
-            return str.replace(RE_SPACES, ' ').split(delimiter).reduce(function(acc, expr, i){
-                var isPlainText = !(i % 2);
-                return (isPlainText && !expr) ? acc : this._insertInstruction(acc, expr, isPlainText);
-            }.bind(this),  new Parser.RootInstruction());
-        },
-
-        _insertInstruction : function(pinstr, expr, isPlainText){
-            var match = expr.trim().match(Parser.RE_EXPR),
-                operation,
-                body,
-                instr;
-
-            if(isPlainText || match === null){
-                pinstr.addComponent(new Parser.IdInstruction(expr));
-                return pinstr;
-            }
-
-            operation = match[1];
-            body = match[2];
-
-            switch(operation){
-                case Parser.TOKEN_OPERATION_PRINT :
-                    pinstr.addComponent(new Parser.ValInstruction(body));
-                    return pinstr;
-
-                case Parser.TOKEN_OPERATION_SAFE_PRINT :
-                    pinstr.addComponent(new Parser.SafeValInstruction(body));
-                    return pinstr;
-
-                case Parser.TOKEN_OPERATION_IF :
-                    instr = new Parser.ConditionalInstruction(body);
-                    pinstr.addComponent(instr);
-                    return instr;
-
-                case Parser.TOKEN_OPERATION_ELSE :
-                    pinstr.setElsePointer();
-                    return pinstr;
-
-                case Parser.TOKEN_OPERATION_END_IF :
-                case Parser.TOKEN_OPERATION_END_EACH :
-                    return pinstr.getParent();
-//
-//                case Parser.TOKEN_OPERATION_EACH :
-//                    return {type : Parser.EXPR_TYPE_EACH, value : body};
-
-                default :
-                    pinstr.addComponent(new Parser.IdInstruction(expr));
-                    return pinstr;
-            }
-        }
-    };
-
-    birch = {
+    return {
 
         version : '0.0.0',
 
         tag : /\{{2}(.+?)\}{2}/,
 
         compile : function(pattern){
-            var parser = new Parser(pattern, birch.tag);
+            var parser = new Parser(pattern, this.tag);
 
             return function(data){
                 return parser.translate(data);
             };
         }
     };
-
-    return birch;
 }));
