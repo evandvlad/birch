@@ -20,15 +20,6 @@
         RE_SQUARE_BRACKETS = /\[([^\]]+)\]/g,
         RE_HTML_ESC = /[&<>"'\/]/g,
 
-        TAG_TYPE_NULL = 1,
-        TAG_TYPE_PRINT = 2,
-        TAG_TYPE_SAFE_PRINT = 3,
-        TAG_TYPE_IF = 4,
-        TAG_TYPE_ELSE = 5,
-        TAG_TYPE_END_IF = 6,
-        TAG_TYPE_EACH = 7,
-        TAG_TYPE_END_EACH = 8,
-
         SAFE_HTML_MAP = {
             '&' : '&amp;',
             '<' : '&lt;',
@@ -37,8 +28,6 @@
             "'" : '&#39;',
             '/' : '&#x2F;'
         },
-
-        CondTreeItem,
 
         birch;
 
@@ -74,189 +63,17 @@
         });
     }
 
-    function Lexer(pattern, delimiter){
-        this.tags = this._toTags(pattern, delimiter);
-    }
-
-    Lexer.RE_COMMON_TAG = /^(\S+)(?:\s*)(.*?)$/;
-
-    Lexer.TOKEN_OP_PRINT = '=';
-    Lexer.TOKEN_OP_SAFE_PRINT = '~';
-    Lexer.TOKEN_OP_IF = '?';
-    Lexer.TOKEN_OP_ELSE = '!';
-    Lexer.TOKEN_OP_END_IF = '/?';
-    Lexer.TOKEN_OP_EACH = '^';
-    Lexer.TOKEN_OP_END_EACH = '/^';
-    Lexer.TOKEN_METH_CALL = '()';
-
-    // PRINT_OPER = "="
-    // SAFE_PRINT_OPER = "~"
-    // IF_OPER = "?"
-    // ELSE_OPER = "!"
-    // END_IF_OPER = "/?"
-    // EACH_OPER = "^"
-    // END_EACH_OPER = "/^"
-
-    // VAR = Char{Char | Digit | "_"}
-    // PROP = "[" VAR "]" | "." VAR
-    // METH = "()"
-    // GETTER = VAR{PROP | METH}
-
-    // PRINT = PRINT_OPER GETTER
-    // SAFE_PRINT = SAFE_PRINT_OPER GETTER
-    // IF = IF_OPER GETTER
-    // ELSE = ELSE_OPER
-    // END_IF = END_IF_OPER
-    // EACH = GETTER "->" "(" VAR {"," VAR}")"
-    // END_EACH = END_EACH_OPER
-
-    Lexer.prototype = {
-
-        constructor : Lexer,
-
-        getTags : function(){
-            return this.tags;
-        },
-
-        _toTags : function(str, delimiter){
-            return str.replace(RE_SPACES, ' ').split(delimiter).reduce(function(acc, tag, i){
-                var isPlainText = !(i % 2);
-                !(isPlainText && !tag) && acc.push(this._parseTag(isPlainText, tag));
-                return acc;
-            }.bind(this), []);
-        },
-
-        _parseTag : function(isPlainText, value){
-            var data = {},
-                match,
-                op,
-                body;
-
-            if(isPlainText){
-                data.type = TAG_TYPE_NULL;
-                data.execute = constf(value);
-                return data;
-            }
-
-            match = value.trim().match(Lexer.RE_COMMON_TAG);
-
-            if(match === null){
-                throw new Error('incorrect tag: ' + value);
-            }
-
-            op = match[1];
-            body = match[2];
-
-            switch(op){
-                case Lexer.TOKEN_OP_PRINT :
-                    data.type = TAG_TYPE_PRINT;
-                    data.execute = this._genCodeForGetter(body);
-                    break;
-
-                case Lexer.TOKEN_OP_SAFE_PRINT :
-                    data.type = TAG_TYPE_SAFE_PRINT;
-                    data.execute = this._genCodeForSafeGetter(body);
-                    break;
-
-                case Lexer.TOKEN_OP_IF :
-                    data.type = TAG_TYPE_IF;
-                    data.execute = this._genCodeForCond(body);
-                    break;
-
-                case Lexer.TOKEN_OP_ELSE :
-                    data.type = TAG_TYPE_ELSE;
-                    data.execute = constf('');
-                    break;
-
-                case Lexer.TOKEN_OP_END_IF :
-                    data.type = TAG_TYPE_END_IF;
-                    data.execute = constf('');
-                    break;
-
-                case Lexer.TOKEN_OP_EACH :
-                    data.type = TAG_TYPE_EACH;
-                    data.execute = constf('');
-                    break;
-
-                case Lexer.TOKEN_OP_END_EACH :
-                    data.type = TAG_TYPE_END_EACH;
-                    data.execute = constf('');
-                    break;
-
-                default :
-                    throw new Error('operation: ' + op + ' not supported');
-            }
-
-            return data;
-        },
-
-        _genCodeForGetter : function(value){
-            var chunks;
-
-            if(!value){
-                throw new Error('getter value is empty');
-            }
-
-            chunks = this._getterToChunks(value);
-
-            return function(scope){
-                var chnks = chunks.slice(),
-                    ctx = scope,
-                    chunk;
-
-                while(chnks.length && !isNullOrUndefined(ctx)){
-                    chunk = chnks.shift();
-                    ctx = chunk.isEvl ? ctx.call(scope) : ctx[chunk.value];
-                }
-
-                return isNullOrUndefined(ctx) ? '' : ctx;
-            };
-        },
-
-        _genCodeForSafeGetter : function(value){
-            var getter = this._genCodeForGetter(value);
-
-            return function(scope){
-                return toSafeHtml(getter(scope));
-            };
-        },
-
-        _genCodeForCond : function(value){
-            var getter = this._genCodeForGetter(value);
-
-            return function(scope){
-                return !!getter(scope);
-            };
-        },
-
-        _getterToChunks : function(value){
-            return value.replace(RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, chunk){
-                chunk.indexOf(Lexer.TOKEN_METH_CALL) !== -1 ?
-
-                    chunk.split(Lexer.TOKEN_METH_CALL).forEach(function(chnk){
-                        acc.push({isEvl : !chnk, value : chnk});
-                    }) :
-
-                    acc.push({isEvl : false, value : chunk});
-
-                return acc;
-            }, []);
-        }
-    };
-
-    function TreeItem(parent, data){
+    function Instruction(data){
         this.data = data;
-        this.parent = parent;
-        this.children = [];
-        parent && parent.addChild(this);
+        this.parent = null;
+        this.components = [];
     }
 
-    TreeItem.prototype = {
+    Instruction.prototype = {
 
-        constructor : TreeItem,
-
-        addChild : function(child){
-            this.children.push(child);
+        addComponent : function(component){
+            component.parent = this;
+            this.components.push(component);
             return this;
         },
 
@@ -264,72 +81,174 @@
             return this.parent;
         },
 
-        execute : function(scope){
-            return this.children.reduce(function(acc, child){
-                return acc += child.execute(scope);
-            }, '');
+        evaluate : function(scope){
+            throw new Error('method must be overridden');
         }
     };
 
-    CondTreeItem = inherit(TreeItem, {
+    function Parser(pattern, tag){
+        this.tree = this._getTree(pattern, tag);
+    }
 
-        constructor : function(){
-            TreeItem.apply(this, arguments);
-            this.elseSp = -1;
-        },
+    Parser.RE_EXPR = /^(\S+)(?:\s*)(.*?)$/;
 
-        addChild : function(child){
-            child.type === TAG_TYPE_ELSE ?
-                (this.elseSp = this.children.length) :
-                TreeItem.prototype.addChild.apply(this, arguments);
+    Parser.TOKEN_OPERATION_PRINT = '=';
+    Parser.TOKEN_OPERATION_SAFE_PRINT = '~';
+    Parser.TOKEN_OPERATION_IF = '?';
+    Parser.TOKEN_OPERATION_ELSE = '!';
+    Parser.TOKEN_OPERATION_END_IF = '/?';
+    Parser.TOKEN_OPERATION_EACH = '^';
+    Parser.TOKEN_OPERATION_END_EACH = '/^';
 
-            return this;
-        },
+    Parser.RootInstruction = inherit(Instruction, {
 
-        execute : function(scope){
-            var isTrueCond = this.data.execute(scope),
-                children;
-
-            if(!isTrueCond && this.elseSp === -1){
-                return '';
-            }
-
-            children = isTrueCond ?
-                this.children.slice(0, this.elseSp === -1 ? this.children.length : this.elseSp) :
-                this.children.slice(this.elseSp);
-
-            return children.reduce(function(acc, child){
-                return acc += child.execute(scope);
+        evaluate : function(scope){
+            return this.components.reduce(function(acc, child){
+                return acc += child.evaluate(scope);
             }, '');
         }
     });
 
-    function Parser(lexer){
-        this.lexer = lexer;
-    }
+    Parser.IdInstruction = inherit(Instruction, {
+
+        evaluate : function(scope){
+            return this.data || '';
+        }
+
+    });
+
+    Parser.ConditionalInstruction = inherit(Instruction, {
+
+        constructor : function(){
+            Instruction.apply(this, arguments);
+            this.pointerElse = null;
+        },
+
+        setElsePointer : function(){
+            this.pointerElse = this.components.length;
+            return this;
+        },
+
+        evaluate : function(scope){
+            var isTrueCond = !!(new Parser.ValInstruction(this.data).evaluate(scope)),
+                components;
+
+            if(!isTrueCond && this.pointerElse === null){
+                return '';
+            }
+
+            components = isTrueCond ?
+                this.components.slice(0, this.pointerElse === null ? this.components.length : this.pointerElse) :
+                this.components.slice(this.pointerElse);
+
+            return components.reduce(function(acc, component){
+                return acc += component.evaluate(scope);
+            }, '');
+        }
+    });
+
+    Parser.ValInstruction = inherit(Instruction, {
+
+        constructor : function(){
+            var TOKEN_METHOD_CALL = '()';
+
+            Instruction.apply(this, arguments);
+
+            if(!this.data){
+                throw new Error('value is empty');
+            }
+
+            this.chunks = this.data.replace(RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, chunk){
+                chunk.indexOf(TOKEN_METHOD_CALL) !== -1 ?
+
+                    chunk.split(TOKEN_METHOD_CALL).forEach(function(chnk){
+                        acc.push({isMethod : !chnk, value : chnk});
+                    }) :
+
+                    acc.push({isMethod : false, value : chunk});
+
+                return acc;
+            }, []);
+        },
+
+        evaluate : function(scope){
+            var chnks = this.chunks.slice(),
+                ctx = scope,
+                chunk;
+
+            while(chnks.length && !isNullOrUndefined(ctx)){
+                chunk = chnks.shift();
+                ctx = chunk.isMethod ? ctx.call(scope) : ctx[chunk.value];
+            }
+
+            return isNullOrUndefined(ctx) ? '' : ctx;
+        }
+    });
+
+    Parser.SafeValInstruction = inherit(Parser.ValInstruction, {
+
+        evaluate : function(scope){
+            return toSafeHtml(Parser.ValInstruction.prototype.evaluate.call(this, scope));
+        }
+    });
 
     Parser.prototype = {
 
         constructor : Parser,
 
         translate : function(scope){
-            return this.lexer
-                .getTags()
-                .reduce(this._foldTree, new TreeItem(null, null))
-                .execute(scope);
+            return this.tree.evaluate(scope);
         },
 
-        _foldTree : function(treeItem, tag){
-            switch(tag.type){
-                case TAG_TYPE_IF :
-                    return new CondTreeItem(treeItem, tag);
+        _getTree : function(str, delimiter){
+            return str.replace(RE_SPACES, ' ').split(delimiter).reduce(function(acc, expr, i){
+                var isPlainText = !(i % 2);
+                return (isPlainText && !expr) ? acc : this._insertInstruction(acc, expr, isPlainText);
+            }.bind(this),  new Parser.RootInstruction());
+        },
 
-                case TAG_TYPE_END_IF :
-                    return treeItem.getParent();
+        _insertInstruction : function(pinstr, expr, isPlainText){
+            var match = expr.trim().match(Parser.RE_EXPR),
+                operation,
+                body,
+                instr;
+
+            if(isPlainText || match === null){
+                pinstr.addComponent(new Parser.IdInstruction(expr));
+                return pinstr;
+            }
+
+            operation = match[1];
+            body = match[2];
+
+            switch(operation){
+                case Parser.TOKEN_OPERATION_PRINT :
+                    pinstr.addComponent(new Parser.ValInstruction(body));
+                    return pinstr;
+
+                case Parser.TOKEN_OPERATION_SAFE_PRINT :
+                    pinstr.addComponent(new Parser.SafeValInstruction(body));
+                    return pinstr;
+
+                case Parser.TOKEN_OPERATION_IF :
+                    instr = new Parser.ConditionalInstruction(body);
+                    pinstr.addComponent(instr);
+                    return instr;
+
+                case Parser.TOKEN_OPERATION_ELSE :
+                    pinstr.setElsePointer();
+                    return pinstr;
+
+                case Parser.TOKEN_OPERATION_END_IF :
+                case Parser.TOKEN_OPERATION_END_EACH :
+                    return pinstr.getParent();
+//
+//                case Parser.TOKEN_OPERATION_EACH :
+//                    return {type : Parser.EXPR_TYPE_EACH, value : body};
 
                 default :
-                    treeItem.addChild(tag);
-                    return treeItem;
+                    pinstr.addComponent(new Parser.IdInstruction(expr));
+                    return pinstr;
             }
         }
     };
@@ -341,7 +260,7 @@
         tag : /\{{2}(.+?)\}{2}/,
 
         compile : function(pattern){
-            var parser = new Parser(new Lexer(pattern, birch.tag));
+            var parser = new Parser(pattern, birch.tag);
 
             return function(data){
                 return parser.translate(data);

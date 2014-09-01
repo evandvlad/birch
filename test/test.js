@@ -144,4 +144,52 @@ describe('birch', function(){
             test : null
         }), 'false');
     });
+
+    it('if nested', function(){
+        var tmpl = '{{? a }}{{? b}}b{{/? }}{{/?}}';
+
+        assert.equal(birch.compile(tmpl)({
+            a : 1,
+            b : 1
+        }), 'b');
+
+        assert.equal(birch.compile(tmpl)({
+            a : 0,
+            b : 1
+        }), '');
+
+        assert.equal(birch.compile(tmpl)({
+            a : 1,
+            b : 0
+        }), '');
+
+        assert.equal(birch.compile(tmpl)({
+            a : 0,
+            b : 0
+        }), '');
+    });
+
+    it('if / else  nested', function(){
+        var tmpl = '{{? a }}{{? b}}b{{!}}c{{/? }}{{/?}}';
+
+        assert.equal(birch.compile(tmpl)({
+            a : 1,
+            b : 1
+        }), 'b');
+
+        assert.equal(birch.compile(tmpl)({
+            a : 0,
+            b : 1
+        }), '');
+
+        assert.equal(birch.compile(tmpl)({
+            a : 1,
+            b : 0
+        }), 'c');
+
+        assert.equal(birch.compile(tmpl)({
+            a : 0,
+            b : 0
+        }), '');
+    });
 });
