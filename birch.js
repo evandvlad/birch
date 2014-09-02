@@ -36,21 +36,25 @@
         return v === null;
     }
 
+    function isUndefined(v){
+        return typeof v === 'undefined';
+    }
+
     function isNullOrUndefined(v){
-        return typeof v === 'undefined' || isNull(v);
+        return isUndefined(v) || isNull(v);
     }
 
     function Instruction(data){
         this.data = data;
         this.parent = null;
-        this.components = [];
+        this.instructions = [];
     }
 
     Instruction.prototype = {
 
-        addComponent : function(component){
-            component.setParent(this);
-            this.components.push(component);
+        insertInstruction : function(instruction){
+            instruction.setParent(this);
+            this.instructions.push(instruction);
             return this;
         },
 
@@ -59,7 +63,7 @@
             return this;
         },
 
-        getParent : function(){
+        endInsertion : function(){
             return this.parent;
         },
 
@@ -69,7 +73,7 @@
     };
 
     function Parser(pattern, tag){
-        this.tree = this._compile(pattern, tag);
+        this.tree = this._parse(pattern, tag);
     }
 
     Parser.prototype = {
@@ -80,15 +84,15 @@
             return this.tree.evaluate(scope);
         },
 
-        _compile : function(str, delimiter){
+        _parse : function(str, delimiter){
             return str.replace(Parser.RE_SPACES, ' ').split(delimiter).reduce(function(acc, expr, i){
                 var isPlainText = !(i % 2);
                 return (isPlainText && !expr) ? acc : this._insertInstruction(acc, expr);
-            }.bind(this),  new Parser.RootInstruction());
+            }.bind(this), new Parser.RootInstruction());
         },
 
         _insertInstruction : function(parentInstr, expr){
-            var match = expr.trim().match(Parser.RE_EXPR),
+            var match = expr.match(Parser.RE_EXPR),
                 isMatch = !isNull(match),
                 operation = isMatch ? match[1] : null,
                 body = isMatch ? match[2] : expr,
@@ -96,16 +100,15 @@
 
             switch(operation){
                 case Parser.TOKEN_OPERATION_PRINT :
-                    parentInstr.addComponent(new Parser.ValInstruction(body));
-                    return parentInstr;
-
                 case Parser.TOKEN_OPERATION_SAFE_PRINT :
-                    parentInstr.addComponent(new Parser.SafeValInstruction(body));
+                    parentInstr.insertInstruction(
+                        new Parser.ValInstruction(body, operation === Parser.TOKEN_OPERATION_SAFE_PRINT)
+                    );
                     return parentInstr;
 
                 case Parser.TOKEN_OPERATION_IF :
                     instr = new Parser.ConditionalInstruction(body);
-                    parentInstr.addComponent(instr);
+                    parentInstr.insertInstruction(instr);
                     return instr;
 
                 case Parser.TOKEN_OPERATION_ELSE :
@@ -114,25 +117,27 @@
 
                 case Parser.TOKEN_OPERATION_END_IF :
                 case Parser.TOKEN_OPERATION_END_EACH :
-                    return parentInstr.getParent();
-//
-//                case Parser.TOKEN_OPERATION_EACH :
-//                    return {type : Parser.EXPR_TYPE_EACH, value : body};
+                    return parentInstr.endInsertion();
+
+                case Parser.TOKEN_OPERATION_EACH :
+                    instr = new Parser.LoopInstruction(body);
+                    parentInstr.insertInstruction(instr);
+                    return instr;
 
                 default :
-                    parentInstr.addComponent(new Parser.IdInstruction(expr));
+                    parentInstr.insertInstruction(new Parser.IdInstruction(expr));
                     return parentInstr;
             }
         }
     };
 
-    Parser.RE_EXPR = /^(\S+)(?:\s*)(.*?)$/;
+    Parser.RE_EXPR = /^(\S+)(?:\s*)(.*?)\s*$/;
     Parser.RE_SPACES = /[\r\t\n]/g;
 
     Parser.TOKEN_OPERATION_PRINT = '=';
     Parser.TOKEN_OPERATION_SAFE_PRINT = '~';
     Parser.TOKEN_OPERATION_IF = '?';
-    Parser.TOKEN_OPERATION_ELSE = '!';
+    Parser.TOKEN_OPERATION_ELSE = '!?';
     Parser.TOKEN_OPERATION_END_IF = '/?';
     Parser.TOKEN_OPERATION_EACH = '^';
     Parser.TOKEN_OPERATION_END_EACH = '/^';
@@ -140,7 +145,7 @@
     Parser.RootInstruction = inherit(Instruction, {
 
         evaluate : function(scope){
-            return this.components.reduce(function(acc, child){
+            return this.instructions.reduce(function(acc, child){
                 return acc += child.evaluate(scope);
             }, '');
         }
@@ -161,24 +166,25 @@
         },
 
         setElsePointer : function(){
-            this.pointerElse = this.components.length;
+            this.pointerElse = this.instructions.length;
             return this;
         },
 
+        endInsertion : function(){
+            this.ifInstructions = this.instructions.slice(
+                0, isNull(this.pointerElse) ? this.instructions.length : this.pointerElse
+            );
+
+            this.elseInstructions = isNull(this.pointerElse) ? [] : this.instructions.slice(this.pointerElse);
+
+            return Instruction.prototype.endInsertion.call(this);
+        },
+
         evaluate : function(scope){
-            var isTrueCond = !!(new Parser.ValInstruction(this.data).evaluate(scope)),
-                components;
+            var isTrueCond = !!(new Parser.ValInstruction(this.data).evaluate(scope));
 
-            if(!isTrueCond && isNull(this.pointerElse)){
-                return '';
-            }
-
-            components = isTrueCond ?
-                this.components.slice(0, isNull(this.pointerElse) ? this.components.length : this.pointerElse) :
-                this.components.slice(this.pointerElse);
-
-            return components.reduce(function(acc, component){
-                return acc += component.evaluate(scope);
+            return (isTrueCond ? this.ifInstructions : this.elseInstructions).reduce(function(acc, instruction){
+                return acc += instruction.evaluate(scope);
             }, '');
         }
     });
@@ -186,45 +192,7 @@
     Parser.ValInstruction = inherit(Instruction, {
 
         RE_SQUARE_BRACKETS : /\[([^\]]+)\]/g,
-
-        constructor : function(){
-            var TOKEN_METHOD_CALL = '()';
-
-            Instruction.apply(this, arguments);
-
-            if(!this.data){
-                throw new Error('value is empty');
-            }
-
-            this.chunks = this.data.replace(this.RE_SQUARE_BRACKETS, '.$1').split('.').reduce(function(acc, chunk){
-                chunk.indexOf(TOKEN_METHOD_CALL) !== -1 ?
-
-                    chunk.split(TOKEN_METHOD_CALL).forEach(function(chnk){
-                        acc.push({isMethod : !chnk, value : chnk});
-                    }) :
-
-                    acc.push({isMethod : false, value : chunk});
-
-                return acc;
-            }, []);
-        },
-
-        evaluate : function(scope){
-            var chnks = this.chunks.slice(),
-                ctx = scope,
-                chunk;
-
-            while(chnks.length && !isNullOrUndefined(ctx)){
-                chunk = chnks.shift();
-                ctx = chunk.isMethod ? ctx.call(scope) : ctx[chunk.value];
-            }
-
-            return isNullOrUndefined(ctx) ? '' : ctx;
-        }
-    });
-
-    Parser.SafeValInstruction = inherit(Parser.ValInstruction, {
-
+        RE_FCALL : /\(([^)]*)\)/,
         RE_HTML_ESC : /[&<>"'\/]/g,
 
         SAFE_HTML_MAP : {
@@ -236,14 +204,111 @@
             '/' : '&#x2F;'
         },
 
+        constructor : function(data, isEscape){
+            Instruction.apply(this, arguments);
+            this.isEscape = isEscape;
+
+            if(!this.data){
+                throw new Error('value is empty');
+            }
+
+            this.chunks = this.data
+                .replace(this.RE_SQUARE_BRACKETS, '.$1')
+                .split(this.RE_FCALL)
+                .reduce(function(acc, chunk, i){
+                    var isArgsData = i % 2;
+
+                    isArgsData ?
+                        acc.push({
+                            isMethod : true,
+                            args : this._parseArguments(chunk.trim())
+                        }) :
+                        (acc = acc.concat(this._parseProps(chunk.trim())));
+
+                    return acc;
+                }.bind(this), []);
+        },
+
         evaluate : function(scope){
-            return this._toSafeHtml(Parser.ValInstruction.prototype.evaluate.call(this, scope));
+            var chnks = this.chunks.slice(),
+                ctx = scope,
+                chunk,
+                ret;
+
+            while(chnks.length && !isNullOrUndefined(ctx)){
+                chunk = chnks.shift();
+                ctx = chunk.isMethod ? ctx.apply(scope, chunk.args.map(function(arg){
+                    return arg.evaluate(scope);
+                })) : ctx[chunk.value];
+            }
+
+            ret = isNullOrUndefined(ctx) ? '' : ctx;
+
+            return this.isEscape ? this._toSafeHtml(ret) : ret;
         },
 
         _toSafeHtml : function(value){
             return value.replace(this.RE_HTML_ESC, function(ch){
                 return this.SAFE_HTML_MAP[ch];
             }.bind(this));
+        },
+
+        _parseProps : function(str){
+            return str ? str.split('.').reduce(function(acc, name){
+                name && acc.push({
+                    isMethod : false,
+                    value : name
+                });
+
+                return acc;
+            }, []) : [];
+        },
+
+        _parseArguments : function(str){
+            return str ? str.split(',').reduce(function(acc, arg){
+                arg = arg.trim();
+                arg && acc.push(new this.constructor(arg));
+                return acc;
+            }.bind(this), []) : [];
+        }
+    });
+
+    Parser.LoopInstruction = inherit(Instruction, {
+
+        RE_INSTRUCTION_PARTS : /^(\S+?)\s*->\s*([^, ]+)\s*,*\s*(\S+)?\s*$/,
+
+        constructor : function(){
+            var match;
+
+            Instruction.apply(this, arguments);
+            match = this.data.match(this.RE_INSTRUCTION_PARTS);
+
+            if(isNull(match)){
+                throw new Error('syntax error for iteration');
+            }
+
+            this.source = new Parser.ValInstruction(match[1]);
+            this.valueName = match[2];
+            this.keyName = match[3];
+        },
+
+        evaluate : function(scope){
+            return this.source.evaluate(scope).reduce(function(acc, value, i){
+                var nscope = this._createNewScope(scope, value, i);
+
+                this.instructions.forEach(function(instruction){
+                    acc += instruction.evaluate(nscope);
+                }, this);
+
+                return acc;
+            }.bind(this), '');
+        },
+
+        _createNewScope : function(scope, value, index){
+            var nscope = Object.create(scope);
+            nscope[this.valueName] = value;
+            !isUndefined(this.keyName) && (nscope[this.keyName] = index);
+            return nscope;
         }
     });
 
@@ -257,7 +322,7 @@
             var parser = new Parser(pattern, this.tag);
 
             return function(data){
-                return parser.translate(data);
+                return parser.translate(data || {});
             };
         }
     };

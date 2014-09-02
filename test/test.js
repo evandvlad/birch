@@ -9,211 +9,345 @@ var assert = require("assert"),
 
 describe('birch', function(){
 
+    describe('common', function(){
 
-    it('typeof result', function(){
-        assert.equal(typeof birch.compile(''), 'function');
+        it('empty instruction', function(){
+            assert.equal(birch.compile('<div>')({}), '<div>');
+        });
+
+        it('not processing body if token was not found', function(){
+            assert.equal(birch.compile('{{=!==}}')({}), '=!==');
+        });
+
+        it('ignore empty scope', function(){
+            assert.equal(birch.compile('test')(), 'test');
+        });
+
+        it('not trim spaces in text', function(){
+            assert.equal(birch.compile('test {{= delim }} ok')({delim : '-'}), 'test - ok');
+        });
     });
 
-    it('print simple var', function(){
-        assert.equal(birch.compile('<div>{{= test }}</div>')({
-            test : 'my test'
-        }), '<div>my test</div>');
+    describe('print', function(){
+
+        it('empty instruction exception', function(){
+            assert.throws(function(){
+                birch.compile('{{=}}')({});
+            });
+        });
+
+        it('simple property', function(){
+            assert.equal(birch.compile('{{= value}} {{= value }}')({
+                value : 'test'
+            }), 'test test');
+        });
+
+        it('empty string instead of undefined value', function(){
+            assert.equal(birch.compile('{{= value }}')({}), '');
+        });
+
+        it('empty string instead of null value', function(){
+            assert.equal(birch.compile('{{= value}}')({value : null}), '');
+        });
+
+        it('array item', function(){
+            assert.equal(birch.compile('{{= value[0] }}-{{= value[1]}}')({value : [1,2]}), '1-2');
+        });
+
+        it('array item with dot syntax', function(){
+            assert.equal(birch.compile('{{= value.0 }}-{{= value.1}}')({value : [1,2]}), '1-2');
+        });
+
+        it('object property', function(){
+            assert.equal(birch.compile('{{= value[a] }}-{{= value.b}}')({value : {a : 1, b : 2}}), '1-2');
+        });
+
+        it('calling method', function(){
+            assert.equal(birch.compile('{{= value() }}')({value : function(){
+                return 'test';
+            }}), 'test');
+        });
+
+        it('calling method with argument', function(){
+            assert.equal(birch.compile('{{= f(v) }}')({
+                f : function(v){
+                    return v;
+                },
+                v : 'test'
+            }), 'test');
+        });
+
+        it('calling method with arguments', function(){
+            assert.equal(birch.compile('{{= f(v1, v2, v3) }}')({
+                f : function(v1, v2, v3){
+                    return v1 + v2 + v3;
+                },
+                v1 : 'test',
+                v2 : ' - ',
+                v3 : 'ok'
+            }), 'test - ok');
+        });
+
+        it('calling method with complex arguments', function(){
+            assert.equal(birch.compile('{{= f ( d[0].a, d[1].b[0], d[2][0] ) }}')({
+                f : function(v1, v2, v3){
+                    return v1 + v2 + v3;
+                },
+                d : [
+                    {a : 'test'},
+                    {b : [' - ']},
+                    ['ok']
+                ]
+            }), 'test - ok');
+        });
+
+        it('print value with curly brackets', function(){
+            assert.equal(birch.compile('<div>{{= test }} {{= test }}</div>')({
+                test : "{{}}"
+            }), '<div>{{}} {{}}</div>');
+        });
+
+        it('long chain', function(){
+            assert.equal(birch.compile('{{= value.a[1]()().d().e[0] }}')({value : {
+                a : [1, function(){
+                        return function(){
+                            return {
+                                d : function(){
+                                    return {
+                                        e : ['test']
+                                    }
+                                }
+                            };
+                        };
+                    }
+                ]
+            }}), 'test');
+        });
     });
 
-    it('print complex var', function(){
-        assert.equal(birch.compile('<div>{{= test.t.e }}</div>')({
-            test : {t : {e : 'my test'}}
-        }), '<div>my test</div>');
+    describe('safe print', function(){
+
+        it('escape', function(){
+            assert.equal(birch.compile('{{~ value }}')({
+                value : '<>"\'/&'
+            }), '&lt;&gt;&quot;&#39;&#x2F;&amp;');
+        });
     });
 
-    it('print complex var with array prop', function(){
-        assert.equal(birch.compile('<div>{{= test.t.0 }}</div>')({
-            test : {t : ['my test']}
-        }), '<div>my test</div>');
+    describe('conditions', function(){
+
+        it('simple if', function(){
+            var tmpl = '{{? test }}true{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                test : true
+            }), 'true');
+
+            assert.equal(birch.compile(tmpl)({
+                test : false
+            }), '');
+        });
+
+        it('to true values coercion', function(){
+            var tmpl = '{{? test }}true{{!?}}{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                test : 1
+            }), 'true');
+
+            assert.equal(birch.compile(tmpl)({
+                test : '0'
+            }), 'true');
+        });
+
+        it('simple else', function(){
+            var tmpl = '{{? test }}{{!?}}false{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                test : false
+            }), 'false');
+
+            assert.equal(birch.compile(tmpl)({
+                test : true
+            }), '');
+        });
+
+        it('to false values coercion', function(){
+            var tmpl = '{{? test }}{{!?}}false{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                test : 0
+            }), 'false');
+
+            assert.equal(birch.compile(tmpl)({
+                test : NaN
+            }), 'false');
+
+            assert.equal(birch.compile(tmpl)(), 'false');
+        });
+
+        it('if/else', function(){
+            var tmpl = '{{? value.test() }}ok{{!?}}error{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                value : {test : function(){return true;}}
+            }), 'ok');
+
+            assert.equal(birch.compile(tmpl)({
+                value : {test : function(){return false;}}
+            }), 'error');
+        });
+
+        it('nested if', function(){
+            var tmpl = '' +
+                '{{? c1 }}' +
+                    '{{? c2 }}v1 v2 ' +
+                    '{{/?}}' +
+                '{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : true,
+                c2 : true
+            }), 'v1 v2 ');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : true,
+                c2 : false
+            }), '');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : false,
+                c2 : true
+            }), '');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : false,
+                c2 : false
+            }), '');
+        });
+
+        it('nested if 2', function(){
+            var tmpl = '' +
+                '{{? c1 }}v1 ' +
+                    '{{? c2 }}v2 ' +
+                    '{{/?}}' +
+                '{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : true,
+                c2 : true
+            }), 'v1 v2 ');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : true,
+                c2 : false
+            }), 'v1 ');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : false,
+                c2 : true
+            }), '');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : false,
+                c2 : false
+            }), '');
+        });
+
+        it('nested if/else', function(){
+            var tmpl = '' +
+                '{{? c1 }}v1 ' +
+                    '{{? c2 }}v2 ' +
+                    '{{!?}}!v2 ' +
+                    '{{/?}}' +
+                '{{!?}}!v1 ' +
+                '{{/?}}';
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : true,
+                c2 : true
+            }), 'v1 v2 ');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : true,
+                c2 : false
+            }), 'v1 !v2 ');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : false,
+                c2 : true
+            }), '!v1 ');
+
+            assert.equal(birch.compile(tmpl)({
+                c1 : false,
+                c2 : false
+            }), '!v1 ');
+        });
     });
 
-    it('print complex var with square brackets', function(){
-        assert.equal(birch.compile('<div>{{= test[t][0] }}</div>')({
-            test : {t : ['my test']}
-        }), '<div>my test</div>');
-    });
+    describe('iterations', function(){
 
-    it('print empty string if var is incorrect', function(){
-        assert.equal(birch.compile('<div>{{= test[t][0] }}</div>')({
-            test : 'incorrect'
-        }), '<div></div>');
-    });
+        it('iteration count', function(){
+            var tmpl = '{{^ arr -> value, i }}a{{/^}}';
 
-    it('print empty string if var is undefined', function(){
-        assert.equal(birch.compile('<div>{{= test }}</div>')({}), '<div></div>');
-    });
+            assert.equal(birch.compile(tmpl)({
+                arr : [1,2,3]
+            }), 'aaa');
 
-    it('print empty string if var is null', function(){
-        assert.equal(birch.compile('<div>{{= test }}</div>')({
-            test : null
-        }), '<div></div>');
-    });
+            assert.equal(birch.compile(tmpl)({
+                arr : []
+            }), '');
+        });
 
-    it('print some eq vars', function(){
-        assert.equal(birch.compile('<div>{{= test.t }} {{= test.t }} {{= test.t }}</div>')({
-            test : {t : 't'}
-        }), '<div>t t t</div>');
-    });
+        it('iteration count without index ident', function(){
+            var tmpl = '{{^ arr->value}}a{{/^}}';
 
-    it('print with exotic property name', function(){
-        assert.equal(birch.compile('<div>{{= test[property - ###] }}</div>')({
-            'test' : {"property - ###" : 'test'}
-        }), '<div>test</div>');
-    });
+            assert.equal(birch.compile(tmpl)({
+                arr : [1,2,3]
+            }), 'aaa');
 
-    it('print value with curly brackets', function(){
-        assert.equal(birch.compile('<div>{{= test }} {{= test }}</div>')({
-            'test' : "{{}}"
-        }), '<div>{{}} {{}}</div>');
-    });
+            assert.equal(birch.compile(tmpl)({
+                arr : []
+            }), '');
+        });
 
-    it('print method call', function(){
-        assert.equal(birch.compile('<div>{{= test() }} {{= test() }}</div>')({
-            'test' : function(){
-                return 'ok';
-            }
-        }), '<div>ok ok</div>');
-    });
+        it('iteration with value & index data', function(){
+            var tmpl = '{{^ arr->value, index }}{{= index }} - {{= value }}; {{/^}}';
 
-    it('print method call in chain', function(){
-        assert.equal(birch.compile('<div>{{= test()().inner()[0] }} {{= m[0]().data }}</div>')({
-            'test' : function(){
-                return function(){
-                    return {
-                        inner : function(){
-                            return ['ok'];
-                        }
-                    };
-                };
-            },
-            m : [function(){return {data : 'ok'}}]
-        }), '<div>ok ok</div>');
-    });
+            assert.equal(birch.compile(tmpl)({
+                arr : [1,2,3]
+            }), '0 - 1; 1 - 2; 2 - 3; ');
+        });
 
-    it('safe print', function(){
-        assert.equal(birch.compile('string {{~ v }}')({
-            v : '& another <i>"string"\'</i>'
-        }), 'string &amp; another &lt;i&gt;&quot;string&quot;&#39;&lt;&#x2F;i&gt;');
-    });
+        it('iteration only with value', function(){
+            var tmpl = '{{^ arr->value }}{{= index }} - {{= value }}; {{/^}}';
 
-    it('if true prop', function(){
-        assert.equal(birch.compile('{{? test }}true{{/?}}')({
-            test : true
-        }), 'true');
-    });
+            assert.equal(birch.compile(tmpl)({
+                arr : [1,2,3]
+            }), ' - 1;  - 2;  - 3; ');
+        });
 
-    it('if true method', function(){
-        assert.equal(birch.compile('{{? test.a() }}true{{/?}}')({
-            test : {
-                a : function(){
-                    return true;
-                }
-            }
-        }), 'true');
-    });
+        it('shadow data value', function(){
+            var tmpl = 'global - {{= value }}{{^ arr->value }}; local - {{= value }}{{/^}}; global - {{= value}}';
 
-    it('if value to true', function(){
-        assert.equal(birch.compile('{{? test.a() }}true{{/?}}')({
-            test : {
-                a : function(){
-                    return 'some string';
-                }
-            }
-        }), 'true');
-    });
+            assert.equal(birch.compile(tmpl)({
+                arr : [1,2,3],
+                value : 'global'
+            }), 'global - global; local - 1; local - 2; local - 3; global - global');
+        });
 
-    it('if false', function(){
-        assert.equal(birch.compile('{{? test }}true{{/?}}')({
-            test : null
-        }), '');
-    });
+        it('nested iteration', function(){
+            var tmpl = '{{^ items -> itms }}{{^ itms -> value}}{{= value }}; {{/^}}{{/^}}';
 
-    it('if / else true', function(){
-        assert.equal(birch.compile('{{? test }}true{{!}}false{{/?}}')({
-            test : 1
-        }), 'true');
-    });
-
-    it('if / else false', function(){
-        assert.equal(birch.compile('{{? test }}true{{!}}false{{/?}}')({
-            test : null
-        }), 'false');
-    });
-
-    it('if nested', function(){
-        var tmpl = '{{? a }}{{? b}}b{{/? }}{{/?}}';
-
-        assert.equal(birch.compile(tmpl)({
-            a : 1,
-            b : 1
-        }), 'b');
-
-        assert.equal(birch.compile(tmpl)({
-            a : 0,
-            b : 1
-        }), '');
-
-        assert.equal(birch.compile(tmpl)({
-            a : 1,
-            b : 0
-        }), '');
-
-        assert.equal(birch.compile(tmpl)({
-            a : 0,
-            b : 0
-        }), '');
-    });
-
-    it('if / else  nested', function(){
-        var tmpl = '{{? a }}{{? b}}b{{!}}c{{/? }}{{/?}}';
-
-        assert.equal(birch.compile(tmpl)({
-            a : 1,
-            b : 1
-        }), 'b');
-
-        assert.equal(birch.compile(tmpl)({
-            a : 0,
-            b : 1
-        }), '');
-
-        assert.equal(birch.compile(tmpl)({
-            a : 1,
-            b : 0
-        }), 'c');
-
-        assert.equal(birch.compile(tmpl)({
-            a : 0,
-            b : 0
-        }), '');
-    });
-
-    it('if & immediately else', function(){
-        var tmpl = '{{? test }}{{!}}else{{/?}}';
-
-        assert.equal(birch.compile(tmpl)({
-            test : true
-        }), '');
-
-        assert.equal(birch.compile(tmpl)({
-            test : false
-        }), 'else');
-    });
-
-    it('else & immediately end', function(){
-        var tmpl = '{{? test }}if{{!}}{{/?}}';
-
-        assert.equal(birch.compile(tmpl)({
-            test : true
-        }), 'if');
-
-        assert.equal(birch.compile(tmpl)({
-            test : false
-        }), '');
+            assert.equal(birch.compile(tmpl)({
+                items : [
+                    ['a', 'b'],
+                    ['c'],
+                    ['d', 'e', 'f', 'g'],
+                    [],
+                    ['h']
+                ]
+            }), 'a; b; c; d; e; f; g; h; ');
+        });
     });
 });
