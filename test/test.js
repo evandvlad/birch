@@ -15,8 +15,16 @@ describe('birch', function(){
             assert.equal(birch.compile('<div>')({}), '<div>');
         });
 
-        it('not processing body if token was not found', function(){
-            assert.equal(birch.compile('{{=!==}}')({}), '=!==');
+        it('exception if token was not found', function(){
+            assert.throws(function(){
+                birch.compile('{{=!==}}')({});
+            });
+        });
+
+        it('exception if incorrect operation', function(){
+            assert.throws(function(){
+                birch.compile('{{@ a }}')({});
+            });
         });
 
         it('ignore empty scope', function(){
@@ -127,6 +135,12 @@ describe('birch', function(){
 
     describe('safe print', function(){
 
+        it('empty instruction exception', function(){
+            assert.throws(function(){
+                birch.compile('{{~}}')({});
+            });
+        });
+
         it('escape', function(){
             assert.equal(birch.compile('{{~ value }}')({
                 value : '<>"\'/&'
@@ -161,14 +175,16 @@ describe('birch', function(){
         });
 
         it('simple else', function(){
-            var tmpl = '{{? test }}{{!?}}false{{/?}}';
+            var tmpl = '{{? test(v) }}{{!?}}false{{/?}}';
 
             assert.equal(birch.compile(tmpl)({
-                test : false
+                test : function(a){return a;},
+                v : false
             }), 'false');
 
             assert.equal(birch.compile(tmpl)({
-                test : true
+                test : function(a){return a;},
+                v : true
             }), '');
         });
 
