@@ -72,9 +72,17 @@
         },
 
         _collectResult : function(items, scope){
-            return items.reduce(function(acc, item){
-                return acc += (item instanceof Instruction) ? item.evaluate(scope) : item;
-            }, '');
+            var len = items.length,
+                ret = '',
+                item,
+                i;
+
+            for(i = 0; i < len; i += 1){
+                item = items[i];
+                ret += (item instanceof Instruction) ? item.evaluate(scope) : item;
+            }
+
+            return ret;
         }
     };
 
@@ -91,10 +99,20 @@
         },
 
         _parse : function(str, delimiter){
-            return str.replace(Parser.RE_SPACES, ' ').split(delimiter).reduce(function(acc, expr, i){
-                var isPlainText = !(i % 2);
-                return isPlainText ? (expr ? acc.insert(expr) : acc) : this._insert(acc, expr);
-            }.bind(this), new Parser.RootInstruction());
+            var chunks = str.replace(Parser.RE_SPACES, ' ').split(delimiter),
+                len = chunks.length,
+                acc = new Parser.RootInstruction(),
+                isPlainText,
+                chunk,
+                i;
+
+            for(i = 0; i < len; i += 1){
+                isPlainText = !(i % 2);
+                chunk = chunks[i];
+                isPlainText ? (chunk && (acc = acc.insert(chunk))) : (acc = this._insert(acc, chunk));
+            }
+
+            return acc;
         },
 
         _insert : function(parentInstr, expr){
@@ -207,15 +225,7 @@
                 throw new Error('syntax error value is empty');
             }
 
-            this.chunks = this.data
-                .replace(this.RE_SQUARE_BRACKETS, '.$1')
-                .split(this.RE_FCALL)
-                .reduce(function(acc, chunk, i){
-                    var isArgsData = i % 2;
-                    chunk = chunk.trim();
-                    isArgsData ? acc.push(this._parseFCall(chunk)) : (acc = acc.concat(this._parseProps(chunk)));
-                    return acc;
-                }.bind(this), []);
+            this.chunks = this._splitToChunks(this.data);
         },
 
         evaluate : function(scope){
@@ -235,9 +245,28 @@
         },
 
         _toSafeHtml : function(value){
+            var self = this;
+
             return value.replace(this.RE_HTML_ESC, function(ch){
-                return this.SAFE_HTML_MAP[ch];
-            }.bind(this));
+                return self.SAFE_HTML_MAP[ch];
+            });
+        },
+
+        _splitToChunks : function(data){
+            var chunks = data.replace(this.RE_SQUARE_BRACKETS, '.$1').split(this.RE_FCALL),
+                len = chunks.length,
+                ret = [],
+                isArgsData,
+                chunk,
+                i;
+
+            for(i = 0; i < len; i += 1){
+                isArgsData = i % 2;
+                chunk = chunks[i].trim();
+                isArgsData ? ret.push(this._parseFCall(chunk)) : (ret = ret.concat(this._parseProps(chunk)));
+            }
+
+            return ret;
         },
 
         _parseFCall : function(chunk){
@@ -245,24 +274,55 @@
         },
 
         _parseProps : function(str){
-            return str ? str.split('.').reduce(function(acc, name){
-                name && acc.push({isMethod : false, value : name});
-                return acc;
-            }, []) : [];
+            var ret = [],
+                len,
+                props,
+                i;
+
+            if(!str){
+                return ret;
+            }
+
+            props = str.split('.');
+
+            for(i = 0, len = props.length; i < len; i += 1){
+                props[i] && ret.push({isMethod : false, value : props[i]});
+            }
+
+            return ret;
         },
 
         _parseArguments : function(str){
-            return str ? str.split(',').reduce(function(acc, arg){
-                arg = arg.trim();
-                arg && acc.push(new this.constructor(arg));
-                return acc;
-            }.bind(this), []) : [];
+            var ret = [],
+                args,
+                arg,
+                len,
+                i;
+
+            if(!str){
+                return ret;
+            }
+
+            args = str.split(',');
+
+            for(i = 0, len = args.length; i < len; i += 1){
+                arg = args[i].trim();
+                arg && ret.push(new this.constructor(arg));
+            }
+
+            return ret;
         },
 
         _evaluateArguments : function(args, scope){
-            return args.map(function(arg){
-                return arg.evaluate(scope);
-            });
+            var len = args.length,
+                ret = [],
+                i;
+
+            for(i = 0; i < len; i += 1){
+                ret.push(args[i].evaluate(scope));
+            }
+
+            return ret;
         }
     });
 
@@ -308,7 +368,7 @@
 
     return {
 
-        version : '0.0.0',
+        version : '0.0.1',
 
         tag : /\{{2}(.+?)\}{2}/,
 
