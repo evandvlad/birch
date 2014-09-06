@@ -68,7 +68,7 @@
         },
 
         evaluate : function(scope){
-            throw new Error('method must be overridden');
+            return this._collectResult(this.instructions, scope);
         },
 
         _collectResult : function(items, scope){
@@ -101,7 +101,7 @@
         _parse : function(str, delimiter){
             var chunks = str.replace(Parser.RE_SPACES, ' ').split(delimiter),
                 len = chunks.length,
-                acc = new Parser.RootInstruction(),
+                acc = new Instruction(),
                 isPlainText,
                 chunk,
                 i;
@@ -168,12 +168,6 @@
     Parser.TOKEN_OPERATION_END_IF = '/?';
     Parser.TOKEN_OPERATION_EACH = '^';
     Parser.TOKEN_OPERATION_END_EACH = '/^';
-
-    Parser.RootInstruction = inherit(Instruction, {
-        evaluate : function(scope){
-            return this._collectResult(this.instructions, scope);
-        }
-    });
 
     Parser.ConditionalInstruction = inherit(Instruction, {
 
