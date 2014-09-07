@@ -53,7 +53,7 @@
     Instruction.prototype = {
 
         insert : function(instruction){
-            (instruction instanceof Instruction) && instruction.setParent(this);
+            this._isInstructionObject(instruction) && instruction.setParent(this);
             this.instructions.push(instruction);
             return this;
         },
@@ -71,6 +71,10 @@
             return this._collectResult(this.instructions, scope);
         },
 
+        _isInstructionObject : function(instr){
+            return instr && typeof instr.evaluate === 'function';
+        },
+
         _collectResult : function(items, scope){
             var len = items.length,
                 ret = '',
@@ -79,7 +83,7 @@
 
             for(i = 0; i < len; i += 1){
                 item = items[i];
-                ret += (item instanceof Instruction) ? item.evaluate(scope) : item;
+                ret += this._isInstructionObject(item) ? item.evaluate(scope) : item;
             }
 
             return ret;
@@ -116,58 +120,38 @@
         },
 
         _insert : function(parentInstr, expr){
-            var match = expr.match(Parser.RE_EXPR),
-                operation,
-                body,
-                instr;
+            var match = expr.match(Parser.RE_EXPR);
 
             if(isNull(match)){
                 throw new Error('syntax error invalid expr: ' + expr);
             }
 
-            operation = match[1];
-            body = match[2];
-
-            switch(operation){
-                case Parser.TOKEN_OPERATION_PRINT :
-                case Parser.TOKEN_OPERATION_SAFE_PRINT :
-                    parentInstr.insert(new Parser.ValInstruction(body, operation === Parser.TOKEN_OPERATION_SAFE_PRINT));
-                    return parentInstr;
-
-                case Parser.TOKEN_OPERATION_IF :
-                    instr = new Parser.ConditionalInstruction(body);
-                    parentInstr.insert(instr);
-                    return instr;
-
-                case Parser.TOKEN_OPERATION_EACH :
-                    instr = new Parser.LoopInstruction(body);
-                    parentInstr.insert(instr);
-                    return instr;
-
-                case Parser.TOKEN_OPERATION_END_IF :
-                case Parser.TOKEN_OPERATION_END_EACH :
-                    return parentInstr.endInsertion();
-
-                case Parser.TOKEN_OPERATION_ELSE :
-                    parentInstr.setElsePointer();
-                    return parentInstr;
-
-                default :
-                    throw new Error('syntax error unknown operation: ' + operation);
-            }
+            return Parser.applyOperation(parentInstr, match[1], match[2]);
         }
     };
 
     Parser.RE_EXPR = /^(\S+)\s*(.*?)\s*$/;
     Parser.RE_SPACES = /[\r\t\n]/g;
 
-    Parser.TOKEN_OPERATION_PRINT = '=';
-    Parser.TOKEN_OPERATION_SAFE_PRINT = '~';
-    Parser.TOKEN_OPERATION_IF = '?';
-    Parser.TOKEN_OPERATION_ELSE = '!?';
-    Parser.TOKEN_OPERATION_END_IF = '/?';
-    Parser.TOKEN_OPERATION_EACH = '^';
-    Parser.TOKEN_OPERATION_END_EACH = '/^';
+    Parser.operations = {};
+
+    Parser.registerOperation = function(opToken, handler){
+        if(this.operations[opToken]){
+            throw new Error('operation with token: ' + opToken + ' is already register');
+        }
+
+        this.operations[opToken] = handler;
+
+        return this;
+    };
+
+    Parser.applyOperation = function(parentInstruction, opToken, body){
+        if(!this.operations[opToken]){
+            throw new Error('operation: + ' + opToken + ' not found');
+        }
+
+        return this.operations[opToken](parentInstruction, body);
+    };
 
     Parser.ConditionalInstruction = inherit(Instruction, {
 
@@ -223,13 +207,13 @@
         },
 
         evaluate : function(scope){
-            var chnks = this.chunks.slice(),
+            var chunks = this.chunks.slice(),
                 ctx = scope,
                 chunk,
                 ret;
 
-            while(chnks.length && !isNullOrUndefined(ctx)){
-                chunk = chnks.shift();
+            while(chunks.length && !isNullOrUndefined(ctx)){
+                chunk = chunks.shift();
                 ctx = chunk.isMethod ? ctx.apply(scope, this._evaluateArguments(chunk.args, scope)) : ctx[chunk.value];
             }
 
@@ -360,9 +344,32 @@
         }
     });
 
+    Parser.registerOperation('=', function(parentInstr, body){
+        parentInstr.insert(new Parser.ValInstruction(body, false));
+        return parentInstr;
+    }).registerOperation('~', function(parentInstr, body){
+        parentInstr.insert(new Parser.ValInstruction(body, true));
+        return parentInstr;
+    }).registerOperation('?', function(parentInstr, body){
+        var instr = new Parser.ConditionalInstruction(body);
+        parentInstr.insert(instr);
+        return instr;
+    }).registerOperation('!?', function(parentInstr, body){
+        parentInstr.setElsePointer();
+        return parentInstr;
+    }).registerOperation('/?', function(parentInstr, body){
+        return parentInstr.endInsertion();
+    }).registerOperation('^', function(parentInstr, body){
+        var instr = new Parser.LoopInstruction(body);
+        parentInstr.insert(instr);
+        return instr;
+    }).registerOperation('/^', function(parentInstr, body){
+        return parentInstr.endInsertion();
+    });
+
     return {
 
-        version : '0.0.1',
+        version : '0.0.2',
 
         tag : /\{{2}(.+?)\}{2}/,
 
