@@ -32,6 +32,20 @@
         return Ctor;
     }
 
+    function extend(src, dest){
+        var prop;
+
+        dest = dest || {};
+
+        for(prop in src){
+            if(src.hasOwnProperty(prop) && isUndefined(dest[prop])){
+                dest[prop] = src[prop];
+            }
+        }
+
+        return dest;
+    }
+
     function isNull(v){
         return v === null;
     }
@@ -90,8 +104,9 @@
         }
     };
 
-    function Parser(pattern, tag){
-        this.tree = this._parse(pattern, tag);
+    function Parser(pattern, options){
+        this.options = options;
+        this.tree = this._parse(pattern);
     }
 
     Parser.prototype = {
@@ -102,10 +117,10 @@
             return this.tree.evaluate(scope);
         },
 
-        _parse : function(str, delimiter){
-            var chunks = str.replace(Parser.RE_SPACES, ' ').split(delimiter),
-                len = chunks.length,
+        _parse : function(str){
+            var chunks = str.replace(Parser.RE_SPACES, ' ').split(this.options.tag),
                 acc = new Instruction(),
+                len = chunks.length,
                 isPlainText,
                 chunk,
                 i;
@@ -113,7 +128,9 @@
             for(i = 0; i < len; i += 1){
                 isPlainText = !(i % 2);
                 chunk = chunks[i];
-                isPlainText ? (chunk && (acc = acc.insert(chunk))) : (acc = this._insert(acc, chunk));
+                isPlainText ?
+                    (chunk && (acc = acc.insert(this.options.trim ? chunk.trim() : chunk))) :
+                    (acc = this._insert(acc, chunk));
             }
 
             return acc;
@@ -131,7 +148,7 @@
     };
 
     Parser.RE_EXPR = /^(\S+)\s*(.*?)\s*$/;
-    Parser.RE_SPACES = /[\r\t\n]/g;
+    Parser.RE_SPACES = /[\r\t\n]+/g;
 
     Parser.operations = {};
 
@@ -182,66 +199,92 @@
 
     Parser.ValInstruction = inherit(Instruction, {
 
+        RE_PARENTHESIS : /\s*(\(|\))\s*/,
         RE_SQUARE_BRACKETS : /\[([^\]]+)\]/g,
-        RE_FCALL : /\(([^)]*)\)/,
-        RE_HTML_ESC : /[&<>"'\/]/g,
 
-        SAFE_HTML_MAP : {
-            '&' : '&amp;',
-            '<' : '&lt;',
-            '>' : '&gt;',
-            '"' : '&quot;',
-            "'" : '&#39;',
-            '/' : '&#x2F;'
-        },
+        ATOM_TOKEN : '`',
 
-        constructor : function(data, isEscape){
+        constructor : function(data){
             Instruction.apply(this, arguments);
-            this.isEscape = isEscape;
 
             if(!this.data){
                 throw new Error('syntax error value is empty');
             }
 
-            this.chunks = this._splitToChunks(this.data);
+            this.isAtom = this._isAtom(this.data);
+            this.val = this.isAtom ? this._parseAtom(this.data) : this._splitToChunks(this.data);
         },
 
         evaluate : function(scope){
-            var chunks = this.chunks.slice(),
+            return this.isAtom ? this.val : this._evalComplexVal(scope);
+        },
+
+        _isAtom : function(value){
+            return value.charAt(0) === this.ATOM_TOKEN;
+        },
+
+        _evalComplexVal : function(scope){
+            var chunks = this.val.slice(),
                 ctx = scope,
-                chunk,
-                ret;
+                chunk;
 
             while(chunks.length && !isNullOrUndefined(ctx)){
                 chunk = chunks.shift();
                 ctx = chunk.isMethod ? ctx.apply(scope, this._evaluateArguments(chunk.args, scope)) : ctx[chunk.value];
             }
 
-            ret = isNullOrUndefined(ctx) ? '' : ctx;
-
-            return this.isEscape ? this._toSafeHtml(ret) : ret;
-        },
-
-        _toSafeHtml : function(value){
-            var self = this;
-
-            return value.replace(this.RE_HTML_ESC, function(ch){
-                return self.SAFE_HTML_MAP[ch];
-            });
+            return isNullOrUndefined(ctx) ? '' : ctx;
         },
 
         _splitToChunks : function(data){
-            var chunks = data.replace(this.RE_SQUARE_BRACKETS, '.$1').split(this.RE_FCALL),
+            var code = data.replace(this.RE_SQUARE_BRACKETS, '.$1');
+
+            if(code.charAt(0) === this.ATOM_TOKEN){
+                return this._parseAtom(code);
+            }
+
+            return code.indexOf('(') === -1 ?
+                this._parseProps(code) :
+                this._parsePropsAndMeths(code);
+        },
+
+        _parsePropsAndMeths : function(code){
+            var chunks = code.split(this.RE_PARENTHESIS),
                 len = chunks.length,
-                ret = [],
-                isArgsData,
-                chunk,
+                ret = this._parseProps(chunks[0]),
+                argsStr = '',
+                br = 0,
+                val,
                 i;
 
-            for(i = 0; i < len; i += 1){
-                isArgsData = i % 2;
-                chunk = chunks[i].trim();
-                isArgsData ? ret.push(this._parseFCall(chunk)) : (ret = ret.concat(this._parseProps(chunk)));
+            for(i = 1; i < len; i += 1){
+                val = chunks[i];
+
+                if(val === '('){
+                    br += 1;
+
+                    if(br === 1){
+                        continue;
+                    }
+                }
+
+                if(val === ')'){
+                    br -= 1;
+
+                    if(br === 0){
+                        ret.push(this._parseFCall(argsStr));
+                        argsStr = '';
+                        continue;
+                    }
+                }
+
+
+                if(br === 0){
+                    val && (ret = ret.concat(this._parseProps(val)));
+                }
+                else{
+                    argsStr += val;
+                }
             }
 
             return ret;
@@ -251,17 +294,21 @@
             return {isMethod : true, args : this._parseArguments(chunk)};
         },
 
-        _parseProps : function(str){
+        _parseAtom : function(value){
+            return value.slice(1);
+        },
+
+        _parseProps : function(code){
             var ret = [],
                 len,
                 props,
                 i;
 
-            if(!str){
-                return ret;
+            if(!code){
+                return code;
             }
 
-            props = str.split('.');
+            props = code.split('.');
 
             for(i = 0, len = props.length; i < len; i += 1){
                 props[i] && ret.push({isMethod : false, value : props[i]});
@@ -304,9 +351,32 @@
         }
     });
 
+    Parser.SafeValInstruction = inherit(Parser.ValInstruction, {
+
+        RE_HTML_ESC : /[&<>"'\/]/g,
+        SAFE_HTML_MAP : {
+            '&' : '&amp;',
+            '<' : '&lt;',
+            '>' : '&gt;',
+            '"' : '&quot;',
+            "'" : '&#39;',
+            '/' : '&#x2F;'
+        },
+
+        evaluate : function(){
+            var self = this;
+
+            return Parser.ValInstruction.prototype.evaluate
+                .apply(this, arguments)
+                .replace(this.RE_HTML_ESC, function(ch){
+                    return self.SAFE_HTML_MAP[ch];
+                });
+        }
+    });
+
     Parser.LoopInstruction = inherit(Instruction, {
 
-        RE_INSTRUCTION_PARTS : /^(\S+?)\s*->\s*([^, ]+)\s*,*\s*(\S+)?\s*$/,
+        RE_INSTRUCTION_PARTS : /^(\S+?)\s*->\s*([^, ]+)\s*,*\s*(\S+)?$/,
 
         constructor : function(){
             var match;
@@ -345,10 +415,10 @@
     });
 
     Parser.registerOperation('=', function(parentInstr, body){
-        parentInstr.insert(new Parser.ValInstruction(body, false));
+        parentInstr.insert(new Parser.ValInstruction(body));
         return parentInstr;
     }).registerOperation('~', function(parentInstr, body){
-        parentInstr.insert(new Parser.ValInstruction(body, true));
+        parentInstr.insert(new Parser.SafeValInstruction(body));
         return parentInstr;
     }).registerOperation('?', function(parentInstr, body){
         var instr = new Parser.ConditionalInstruction(body);
@@ -357,24 +427,25 @@
     }).registerOperation('!?', function(parentInstr, body){
         parentInstr.setElsePointer();
         return parentInstr;
-    }).registerOperation('/?', function(parentInstr, body){
-        return parentInstr.endInsertion();
     }).registerOperation('^', function(parentInstr, body){
         var instr = new Parser.LoopInstruction(body);
         parentInstr.insert(instr);
         return instr;
-    }).registerOperation('/^', function(parentInstr, body){
+    }).registerOperation('/', function(parentInstr, body){
         return parentInstr.endInsertion();
     });
 
     return {
 
-        version : '0.0.2',
+        version : '1.0.0',
 
-        tag : /\{{2}(.+?)\}{2}/,
+        options : {
+            tag : /\{{2}(.+?)\}{2}/,
+            trim : true
+        },
 
-        compile : function(pattern){
-            var parser = new Parser(pattern, this.tag);
+        compile : function(pattern, options){
+            var parser = new Parser(pattern, extend(this.options, options));
 
             return function(data){
                 return parser.translate(data || {});
