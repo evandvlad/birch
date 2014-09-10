@@ -12,7 +12,7 @@ Birch - шаблонизатор с предварительной компил�
 * Возможность замены шаблона парсера
 
 #### Производительность ####
-[http://jsperf.com/template-engines-performance-compiling-rendering/2](http://jsperf.com/template-engines-performance-compiling-rendering/2)
+[http://jsperf.com/template-engines-performance-compiling-rendering/3](http://jsperf.com/template-engines-performance-compiling-rendering/3)
 
 #### Синктаксис ####
 
