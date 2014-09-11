@@ -48,6 +48,64 @@ describe('birch', function(){
         })
     });
 
+    describe('env', function(){
+
+        it('empty env prop', function(){
+            assert.equal(birch.compile('{{= @value }}')(), '');
+        });
+
+        it('env prop', function(){
+            assert.equal(birch.compile('{{= @value }}', {
+                env : {value : 'test'}
+            })(), 'test');
+        });
+
+        it('env nested prop', function(){
+            assert.equal(birch.compile('{{= @a.b[0] }}', {
+                env : {a : {b : ['test']}}
+            })(), 'test');
+        });
+
+        it('env method', function(){
+            assert.equal(birch.compile('{{= @f() }}', {
+                env : {
+                    f : function(){
+                        return 'test';
+                    }
+                }
+            })(), 'test');
+        });
+
+        it('env method with arguments', function(){
+            assert.equal(birch.compile('{{= @f(`te, v) }}', {
+                env : {
+                    f : function(a, b){
+                        return a + b;
+                    }
+                }
+            })({
+                v : 'st'
+            }), 'test');
+        });
+
+        it('env method with env arguments', function(){
+            assert.equal(birch.compile('{{= @f( @g (@v), v) }}', {
+                env : {
+                    f : function(a, b){
+                        return a + b;
+                    },
+                    g : function(a){
+                        return a + 'e';
+                    },
+                    v : 't'
+                }
+            })({
+                v : 'st'
+            }), 'test');
+        });
+
+    });
+
     describe('print', function(){
 
         it('empty instruction exception', function(){
@@ -622,5 +680,40 @@ describe('birch', function(){
                 }
             }), '<div>test</div>');
         });
+
+        it('ex 23', function(){
+            assert.equal(birch.compile('<div>{{= @value }}</div>', {
+                env : {
+                    value : 'test'
+                }
+            })(), '<div>test</div>');
+        });
+
+        it('ex 24', function(){
+            assert.equal(birch.compile('<div>{{= @f() }}</div>', {
+                env : {
+                    f : function(){
+                        return 'test';
+                    }
+                }
+            })(), '<div>test</div>');
+        });
+
+        it('ex 25', function(){
+            assert.equal(birch.compile('<div>{{= @f.a ( @f.b ( v ), `st ) }}</div>', {
+                env : {
+                    f : {
+                        a :function(a, b){
+                            return a + b;
+                        },
+                        b : function(v){
+                            return v + 'e';
+                        }
+                    }
+                }
+            })({
+                v : 't'
+            }), '<div>test</div>');
+        })
     });
 });

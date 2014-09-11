@@ -58,7 +58,8 @@
         return isUndefined(v) || isNull(v);
     }
 
-    function Instruction(data){
+    function Instruction(env, data){
+        this.env = env;
         this.data = data;
         this.parent = null;
         this.instructions = [];
@@ -67,7 +68,7 @@
     Instruction.prototype = {
 
         insert : function(instruction){
-            this._isInstructionObject(instruction) && instruction.setParent(this);
+            this._isIObject(instruction) && instruction.setParent(this);
             this.instructions.push(instruction);
             return this;
         },
@@ -81,15 +82,15 @@
             return this.parent;
         },
 
-        evaluate : function(scope){
-            return this._collectResult(this.instructions, scope);
+        evaluate : function(data){
+            return this._fold(this.instructions, data);
         },
 
-        _isInstructionObject : function(instr){
+        _isIObject : function(instr){
             return instr && typeof instr.evaluate === 'function';
         },
 
-        _collectResult : function(items, scope){
+        _fold : function(items, data){
             var len = items.length,
                 ret = '',
                 item,
@@ -97,7 +98,7 @@
 
             for(i = 0; i < len; i += 1){
                 item = items[i];
-                ret += this._isInstructionObject(item) ? item.evaluate(scope) : item;
+                ret += this._isIObject(item) ? item.evaluate(data) : item;
             }
 
             return ret;
@@ -113,13 +114,13 @@
 
         constructor : Parser,
 
-        translate : function(scope){
-            return this.tree.evaluate(scope);
+        translate : function(data){
+            return this.tree.evaluate(data);
         },
 
         _parse : function(str){
             var chunks = str.replace(Parser.RE_SPACES, ' ').split(this.options.tag),
-                acc = new Instruction(),
+                acc = new Instruction(this.options.env),
                 len = chunks.length,
                 isPlainText,
                 chunk,
@@ -143,7 +144,7 @@
                 throw new Error('syntax error invalid expr: ' + expr);
             }
 
-            return Parser.applyOperation(parentInstr, match[1], match[2]);
+            return Parser.opApply(parentInstr, match[1], this.options.env, match[2]);
         }
     };
 
@@ -152,7 +153,7 @@
 
     Parser.operations = {};
 
-    Parser.registerOperation = function(opToken, handler){
+    Parser.opRegister = function(opToken, handler){
         if(this.operations[opToken]){
             throw new Error('operation with token: ' + opToken + ' is already register');
         }
@@ -162,12 +163,12 @@
         return this;
     };
 
-    Parser.applyOperation = function(parentInstruction, opToken, body){
+    Parser.opApply = function(parentInstruction, opToken, env, body){
         if(!this.operations[opToken]){
             throw new Error('operation: + ' + opToken + ' not found');
         }
 
-        return this.operations[opToken](parentInstruction, body);
+        return this.operations[opToken](parentInstruction, env, body);
     };
 
     Parser.ConditionalInstruction = inherit(Instruction, {
@@ -175,7 +176,7 @@
         constructor : function(){
             Instruction.apply(this, arguments);
             this.pointerElse = null;
-            this.cond = new Parser.ValInstruction(this.data);
+            this.cond = new Parser.ValInstruction(this.env, this.data);
         },
 
         setElsePointer : function(){
@@ -193,7 +194,7 @@
         },
 
         evaluate : function(scope){
-            return this._collectResult(this.cond.evaluate(scope) ? this.tinstr : this.finstr, scope);
+            return this._fold(this.cond.evaluate(scope) ? this.tinstr : this.finstr, scope);
         }
     });
 
@@ -203,6 +204,7 @@
         RE_SQUARE_BRACKETS : /\[([^\]]+)\]/g,
 
         ATOM_TOKEN : '`',
+        ENV_VAL_TOKEN : '@',
 
         constructor : function(data){
             Instruction.apply(this, arguments);
@@ -211,45 +213,64 @@
                 throw new Error('syntax error value is empty');
             }
 
-            this.isAtom = this._isAtom(this.data);
-            this.val = this.isAtom ? this._parseAtom(this.data) : this._splitToChunks(this.data);
+            this.code = this._genCode(this.data);
         },
 
-        evaluate : function(scope){
-            return this.isAtom ? this.val : this._evalComplexVal(scope);
+        evaluate : function(data){
+            return this.code(data);
         },
 
-        _isAtom : function(value){
-            return value.charAt(0) === this.ATOM_TOKEN;
+        _genCode : function(str){
+            var self = this,
+                val;
+
+            switch(str.charAt(0)){
+                case this.ATOM_TOKEN :
+                    val = str.slice(1);
+
+                    return function(data){
+                        return val;
+                    };
+
+                case this.ENV_VAL_TOKEN :
+                    val = this._splitToChunks(str.slice(1));
+
+                    return function(data){
+                        return self._evalComplexVal(val, self.env, data);
+                    };
+
+                default :
+                    val = this._splitToChunks(str);
+
+                    return function(data){
+                        return self._evalComplexVal(val, data, data);
+                    };
+            }
         },
 
-        _evalComplexVal : function(scope){
-            var chunks = this.val.slice(),
+        _evalComplexVal : function(value, scope, data){
+            var chunks = value.slice(),
                 ctx = scope,
                 chunk;
 
             while(chunks.length && !isNullOrUndefined(ctx)){
                 chunk = chunks.shift();
-                ctx = chunk.isMethod ? ctx.apply(scope, this._evaluateArguments(chunk.args, scope)) : ctx[chunk.value];
+                ctx = chunk.isMethod ? ctx.apply(null, this._evaluateArguments(chunk.args, data)) : ctx[chunk.value];
             }
 
             return isNullOrUndefined(ctx) ? '' : ctx;
         },
 
         _splitToChunks : function(data){
-            var code = data.replace(this.RE_SQUARE_BRACKETS, '.$1');
+            var str = data.replace(this.RE_SQUARE_BRACKETS, '.$1');
 
-            if(code.charAt(0) === this.ATOM_TOKEN){
-                return this._parseAtom(code);
-            }
-
-            return code.indexOf('(') === -1 ?
-                this._parseProps(code) :
-                this._parsePropsAndMeths(code);
+            return str.indexOf('(') === -1 ?
+                this._parseProps(str) :
+                this._parsePropsAndMeths(str);
         },
 
-        _parsePropsAndMeths : function(code){
-            var chunks = code.split(this.RE_PARENTHESIS),
+        _parsePropsAndMeths : function(str){
+            var chunks = str.split(this.RE_PARENTHESIS),
                 len = chunks.length,
                 ret = this._parseProps(chunks[0]),
                 argsStr = '',
@@ -294,21 +315,17 @@
             return {isMethod : true, args : this._parseArguments(chunk)};
         },
 
-        _parseAtom : function(value){
-            return value.slice(1);
-        },
-
-        _parseProps : function(code){
+        _parseProps : function(str){
             var ret = [],
                 len,
                 props,
                 i;
 
-            if(!code){
-                return code;
+            if(!str){
+                return str;
             }
 
-            props = code.split('.');
+            props = str.split('.');
 
             for(i = 0, len = props.length; i < len; i += 1){
                 props[i] && ret.push({isMethod : false, value : props[i]});
@@ -332,19 +349,19 @@
 
             for(i = 0, len = args.length; i < len; i += 1){
                 arg = args[i].trim();
-                arg && ret.push(new this.constructor(arg));
+                arg && ret.push(new this.constructor(this.env, arg));
             }
 
             return ret;
         },
 
-        _evaluateArguments : function(args, scope){
+        _evaluateArguments : function(args, data){
             var len = args.length,
                 ret = [],
                 i;
 
             for(i = 0; i < len; i += 1){
-                ret.push(args[i].evaluate(scope));
+                ret.push(args[i].evaluate(data));
             }
 
             return ret;
@@ -388,60 +405,61 @@
                 throw new Error('syntax error for iteration');
             }
 
-            this.source = new Parser.ValInstruction(match[1]);
+            this.source = new Parser.ValInstruction(this.env, match[1]);
             this.valueName = match[2];
             this.keyName = match[3];
         },
 
-        evaluate : function(scope){
-            var source = this.source.evaluate(scope),
+        evaluate : function(data){
+            var source = this.source.evaluate(data),
                 len = source.length,
                 ret = '',
                 i;
 
             for(i = 0; i < len; i += 1){
-                ret += this._collectResult(this.instructions, this._createNewScope(scope, source[i], i));
+                ret += this._fold(this.instructions, this._createNewScope(data, source[i], i));
             }
 
             return ret;
         },
 
-        _createNewScope : function(scope, value, index){
-            var nscope = Object.create(scope);
+        _createNewScope : function(data, value, index){
+            var nscope = Object.create(data);
             nscope[this.valueName] = value;
             !isUndefined(this.keyName) && (nscope[this.keyName] = index);
             return nscope;
         }
     });
 
-    Parser.registerOperation('=', function(parentInstr, body){
-        parentInstr.insert(new Parser.ValInstruction(body));
+    Parser.opRegister('=', function(parentInstr, env, body){
+        parentInstr.insert(new Parser.ValInstruction(env, body));
         return parentInstr;
-    }).registerOperation('~', function(parentInstr, body){
-        parentInstr.insert(new Parser.SafeValInstruction(body));
+    }).opRegister('~', function(parentInstr, env, body){
+        parentInstr.insert(new Parser.SafeValInstruction(env, body));
         return parentInstr;
-    }).registerOperation('?', function(parentInstr, body){
-        var instr = new Parser.ConditionalInstruction(body);
+    }).opRegister('?', function(parentInstr, env, body){
+        var instr = new Parser.ConditionalInstruction(env, body);
         parentInstr.insert(instr);
         return instr;
-    }).registerOperation('!?', function(parentInstr, body){
+    }).opRegister('!?', function(parentInstr, env, body){
         parentInstr.setElsePointer();
         return parentInstr;
-    }).registerOperation('^', function(parentInstr, body){
-        var instr = new Parser.LoopInstruction(body);
+    }).opRegister('^', function(parentInstr, env, body){
+        var instr = new Parser.LoopInstruction(env, body);
         parentInstr.insert(instr);
         return instr;
-    }).registerOperation('/', function(parentInstr, body){
+    }).opRegister('/', function(parentInstr, env, body){
         return parentInstr.endInsertion();
     });
 
     return {
 
-        version : '1.0.0',
+        version : '1.1.0',
 
         options : {
             tag : /\{{2}(.+?)\}{2}/,
-            trim : true
+            trim : true,
+            env : {}
         },
 
         compile : function(pattern, options){
