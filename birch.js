@@ -16,6 +16,11 @@
 
     'use strict';
 
+    var ValInstruction,
+        SafeValInstruction,
+        ConditionalInstruction,
+        LoopInstruction;
+
     function inherit(Parent, ext){
         var Ctor = Object.hasOwnProperty.call(ext, 'constructor') ?
             ext.constructor :
@@ -67,6 +72,8 @@
 
     Instruction.prototype = {
 
+        constructor : Instruction,
+
         insert : function(instruction){
             this._isIObject(instruction) && instruction.setParent(this);
             this.instructions.push(instruction);
@@ -90,63 +97,296 @@
             return instr && typeof instr.evaluate === 'function';
         },
 
-        _fold : function(items, data){
-            var len = items.length,
-                ret = '',
-                item,
+        _fold : function(instrs, data){
+            var len = instrs.length,
+                result = '',
+                instr,
                 i;
 
             for(i = 0; i < len; i += 1){
-                item = items[i];
-                ret += this._isIObject(item) ? item.evaluate(data) : item;
+                instr = instrs[i];
+                result += this._isIObject(instr) ? instr.evaluate(data) : instr;
             }
 
-            return ret;
+            return result;
         }
     };
+
+    ValInstruction = inherit(Instruction, {
+
+        RE_PARENTHESIS : /\s*(\(|\))\s*/,
+        RE_SQUARE_BRACKETS : /\[([^\]]+)\]/g,
+
+        ATOM_TOKEN : '`',
+        ENV_VAL_TOKEN : '@',
+
+        constructor : function(data){
+            Instruction.apply(this, arguments);
+
+            if(!this.data){
+                throw new Error('syntax error value is empty');
+            }
+
+            this.code = this._generateCode(this.data);
+        },
+
+        evaluate : function(data){
+            return this.code(data);
+        },
+
+        _generateCode : function(str){
+            var self = this,
+                value;
+
+            switch(str.charAt(0)){
+                case this.ATOM_TOKEN :
+                    value = str.slice(1);
+
+                    return function(data){
+                        return value;
+                    };
+
+                case this.ENV_VAL_TOKEN :
+                    value = this._stringToTokens(str.slice(1));
+
+                    return function(data){
+                        return self._evalComplexVal(value, self.env, data);
+                    };
+
+                default :
+                    value = this._stringToTokens(str);
+
+                    return function(data){
+                        return self._evalComplexVal(value, data, data);
+                    };
+            }
+        },
+
+        _evalComplexVal : function(tokens, scope, data){
+            var len = tokens.length,
+                frame = scope,
+                frames = [frame],
+                token,
+                i;
+
+            for(i = 0; i < len && !isNullOrUndefined(frame); i += 1){
+                token = tokens[i];
+                frame = token.isMethod ?
+                    frame.apply(this._lookupFCallContext(frames, tokens, i), this._evalArguments(token.args, data)) :
+                    frame[token.value];
+
+                frames.push(frame);
+            }
+
+            return isNullOrUndefined(frame) ? '' : frame;
+        },
+
+        _stringToTokens : function(rawValStr){
+            var valStr = rawValStr.replace(this.RE_SQUARE_BRACKETS, '.$1');
+
+            return valStr.indexOf('(') === -1 ?
+                this._parseProps(valStr) :
+                this._parsePropsAndMeths(valStr);
+        },
+
+        _parsePropsAndMeths : function(str){
+            var chunks = str.split(this.RE_PARENTHESIS),
+                len = chunks.length,
+                result = this._parseProps(chunks[0]),
+                argsStr = '',
+                parenthesis = 0,
+                chunk,
+                i;
+
+            for(i = 1; i < len; i += 1){
+                chunk = chunks[i];
+
+                if(chunk === '('){
+                    parenthesis += 1;
+
+                    if(parenthesis === 1){
+                        continue;
+                    }
+                }
+
+                if(chunk === ')'){
+                    parenthesis -= 1;
+
+                    if(parenthesis === 0){
+                        result.push(this._parseFCall(argsStr));
+                        argsStr = '';
+                        continue;
+                    }
+                }
+
+
+                if(parenthesis === 0){
+                    chunk && (result = result.concat(this._parseProps(chunk)));
+                }
+                else{
+                    argsStr += chunk;
+                }
+            }
+
+            return result;
+        },
+
+        _parseFCall : function(argsStr){
+            return {isMethod : true, args : this._argsStringToInstructions(argsStr)};
+        },
+
+        _lookupFCallContext : function(frames, chunks, index){
+            var prevIndex = index - 1;
+            return chunks[prevIndex].isMethod ? null : frames[prevIndex];
+        },
+
+        _parseProps : function(propsStr){
+            var propsData = [],
+                len,
+                props,
+                i;
+
+            if(!propsStr){
+                return propsStr;
+            }
+
+            props = propsStr.split('.');
+
+            for(i = 0, len = props.length; i < len; i += 1){
+                props[i] && propsData.push({isMethod : false, value : props[i]});
+            }
+
+            return propsData;
+        },
+
+        _argsStringToInstructions : function(argsStr){
+            var instrs = [],
+                args,
+                arg,
+                len,
+                i;
+
+            if(!argsStr){
+                return instrs;
+            }
+
+            args = argsStr.split(',');
+
+            for(i = 0, len = args.length; i < len; i += 1){
+                arg = args[i].trim();
+                arg && instrs.push(new this.constructor(this.env, arg));
+            }
+
+            return instrs;
+        },
+
+        _evalArguments : function(args, data){
+            var len = args.length,
+                argsResult = [],
+                i;
+
+            for(i = 0; i < len; i += 1){
+                argsResult.push(args[i].evaluate(data));
+            }
+
+            return argsResult;
+        }
+    });
+
+    SafeValInstruction = inherit(ValInstruction, {
+
+        RE_HTML_ESC : /[&<>"'\/]/g,
+        SAFE_HTML_MAP : {
+            '&' : '&amp;',
+            '<' : '&lt;',
+            '>' : '&gt;',
+            '"' : '&quot;',
+            "'" : '&#39;',
+            '/' : '&#x2F;'
+        },
+
+        evaluate : function(){
+            var self = this;
+
+            return ValInstruction.prototype.evaluate
+                .apply(this, arguments)
+                .replace(this.RE_HTML_ESC, function(chr){
+                    return self.SAFE_HTML_MAP[chr];
+                });
+        }
+    });
+
+    ConditionalInstruction = inherit(Instruction, {
+
+        constructor : function(){
+            Instruction.apply(this, arguments);
+            this.pointerElse = null;
+            this.cond = new ValInstruction(this.env, this.data);
+        },
+
+        setElsePointer : function(){
+            this.pointerElse = this.instructions.length;
+            return this;
+        },
+
+        endInsertion : function(){
+            var isNotSetPointerElse = isNull(this.pointerElse);
+
+            this.tinstr = this.instructions.slice(0, isNotSetPointerElse ? this.instructions.length : this.pointerElse);
+            this.finstr = isNotSetPointerElse ? [] : this.instructions.slice(this.pointerElse);
+
+            return Instruction.prototype.endInsertion.call(this);
+        },
+
+        evaluate : function(data){
+            return this._fold(this.cond.evaluate(data) ? this.tinstr : this.finstr, data);
+        }
+    });
+
+    LoopInstruction = inherit(Instruction, {
+
+        RE_INSTRUCTION_PARTS : /^(\S+?)\s*->\s*([^, ]+)\s*,*\s*(\S+)?$/,
+
+        constructor : function(){
+            var matchExpr;
+
+            Instruction.apply(this, arguments);
+            matchExpr = this.data.match(this.RE_INSTRUCTION_PARTS);
+
+            if(isNull(matchExpr)){
+                throw new Error('syntax error for iteration');
+            }
+
+            this.list = new ValInstruction(this.env, matchExpr[1]);
+            this.valueName = matchExpr[2];
+            this.keyName = matchExpr[3];
+        },
+
+        evaluate : function(data){
+            var list = this.list.evaluate(data),
+                len = list.length,
+                result = '',
+                i;
+
+            for(i = 0; i < len; i += 1){
+                result += this._fold(this.instructions, this._createNewScope(data, list[i], i));
+            }
+
+            return result;
+        },
+
+        _createNewScope : function(data, value, index){
+            var newScope = Object.create(data);
+            newScope[this.valueName] = value;
+            !isUndefined(this.keyName) && (newScope[this.keyName] = index);
+            return newScope;
+        }
+    });
 
     function Parser(pattern, options){
         this.options = options;
         this.tree = this._parse(pattern);
     }
-
-    Parser.prototype = {
-
-        constructor : Parser,
-
-        translate : function(data){
-            return this.tree.evaluate(data);
-        },
-
-        _parse : function(str){
-            var chunks = str.replace(Parser.RE_SPACES, ' ').split(this.options.tag),
-                acc = new Instruction(this.options.env),
-                len = chunks.length,
-                isPlainText,
-                chunk,
-                i;
-
-            for(i = 0; i < len; i += 1){
-                isPlainText = !(i % 2);
-                chunk = chunks[i];
-                isPlainText ?
-                    (chunk && (acc = acc.insert(this.options.trim ? chunk.trim() : chunk))) :
-                    (acc = this._insert(acc, chunk));
-            }
-
-            return acc;
-        },
-
-        _insert : function(parentInstr, expr){
-            var match = expr.match(Parser.RE_EXPR);
-
-            if(isNull(match)){
-                throw new Error('syntax error invalid expr: ' + expr);
-            }
-
-            return Parser.opApply(parentInstr, match[1], this.options.env, match[2]);
-        }
-    };
 
     Parser.RE_EXPR = /^(\S+)\s*(.*?)\s*$/;
     Parser.RE_SPACES = /[\r\t\n]+/g;
@@ -171,281 +411,59 @@
         return this.operations[opToken](parentInstruction, env, body);
     };
 
-    Parser.ConditionalInstruction = inherit(Instruction, {
+    Parser.prototype = {
 
-        constructor : function(){
-            Instruction.apply(this, arguments);
-            this.pointerElse = null;
-            this.cond = new Parser.ValInstruction(this.env, this.data);
+        constructor : Parser,
+
+        translate : function(data){
+            return this.tree.evaluate(data);
         },
 
-        setElsePointer : function(){
-            this.pointerElse = this.instructions.length;
-            return this;
-        },
-
-        endInsertion : function(){
-            var isNotSetPointerElse = isNull(this.pointerElse);
-
-            this.tinstr = this.instructions.slice(0, isNotSetPointerElse ? this.instructions.length : this.pointerElse);
-            this.finstr = isNotSetPointerElse ? [] : this.instructions.slice(this.pointerElse);
-
-            return Instruction.prototype.endInsertion.call(this);
-        },
-
-        evaluate : function(scope){
-            return this._fold(this.cond.evaluate(scope) ? this.tinstr : this.finstr, scope);
-        }
-    });
-
-    Parser.ValInstruction = inherit(Instruction, {
-
-        RE_PARENTHESIS : /\s*(\(|\))\s*/,
-        RE_SQUARE_BRACKETS : /\[([^\]]+)\]/g,
-
-        ATOM_TOKEN : '`',
-        ENV_VAL_TOKEN : '@',
-
-        constructor : function(data){
-            Instruction.apply(this, arguments);
-
-            if(!this.data){
-                throw new Error('syntax error value is empty');
-            }
-
-            this.code = this._genCode(this.data);
-        },
-
-        evaluate : function(data){
-            return this.code(data);
-        },
-
-        _genCode : function(str){
-            var self = this,
-                val;
-
-            switch(str.charAt(0)){
-                case this.ATOM_TOKEN :
-                    val = str.slice(1);
-
-                    return function(data){
-                        return val;
-                    };
-
-                case this.ENV_VAL_TOKEN :
-                    val = this._splitToChunks(str.slice(1));
-
-                    return function(data){
-                        return self._evalComplexVal(val, self.env, data);
-                    };
-
-                default :
-                    val = this._splitToChunks(str);
-
-                    return function(data){
-                        return self._evalComplexVal(val, data, data);
-                    };
-            }
-        },
-
-        _evalComplexVal : function(value, scope, data){
-            var chunks = value.slice(),
-                ctx = scope,
-                chunk;
-
-            while(chunks.length && !isNullOrUndefined(ctx)){
-                chunk = chunks.shift();
-                ctx = chunk.isMethod ? ctx.apply(null, this._evaluateArguments(chunk.args, data)) : ctx[chunk.value];
-            }
-
-            return isNullOrUndefined(ctx) ? '' : ctx;
-        },
-
-        _splitToChunks : function(data){
-            var str = data.replace(this.RE_SQUARE_BRACKETS, '.$1');
-
-            return str.indexOf('(') === -1 ?
-                this._parseProps(str) :
-                this._parsePropsAndMeths(str);
-        },
-
-        _parsePropsAndMeths : function(str){
-            var chunks = str.split(this.RE_PARENTHESIS),
-                len = chunks.length,
-                ret = this._parseProps(chunks[0]),
-                argsStr = '',
-                br = 0,
-                val,
-                i;
-
-            for(i = 1; i < len; i += 1){
-                val = chunks[i];
-
-                if(val === '('){
-                    br += 1;
-
-                    if(br === 1){
-                        continue;
-                    }
-                }
-
-                if(val === ')'){
-                    br -= 1;
-
-                    if(br === 0){
-                        ret.push(this._parseFCall(argsStr));
-                        argsStr = '';
-                        continue;
-                    }
-                }
-
-
-                if(br === 0){
-                    val && (ret = ret.concat(this._parseProps(val)));
-                }
-                else{
-                    argsStr += val;
-                }
-            }
-
-            return ret;
-        },
-
-        _parseFCall : function(chunk){
-            return {isMethod : true, args : this._parseArguments(chunk)};
-        },
-
-        _parseProps : function(str){
-            var ret = [],
-                len,
-                props,
-                i;
-
-            if(!str){
-                return str;
-            }
-
-            props = str.split('.');
-
-            for(i = 0, len = props.length; i < len; i += 1){
-                props[i] && ret.push({isMethod : false, value : props[i]});
-            }
-
-            return ret;
-        },
-
-        _parseArguments : function(str){
-            var ret = [],
-                args,
-                arg,
-                len,
-                i;
-
-            if(!str){
-                return ret;
-            }
-
-            args = str.split(',');
-
-            for(i = 0, len = args.length; i < len; i += 1){
-                arg = args[i].trim();
-                arg && ret.push(new this.constructor(this.env, arg));
-            }
-
-            return ret;
-        },
-
-        _evaluateArguments : function(args, data){
-            var len = args.length,
-                ret = [],
+        _parse : function(template){
+            var opCodes = template.replace(Parser.RE_SPACES, ' ').split(this.options.tag),
+                tree = new Instruction(this.options.env),
+                len = opCodes.length,
+                isPlainText,
+                opCode,
                 i;
 
             for(i = 0; i < len; i += 1){
-                ret.push(args[i].evaluate(data));
+                isPlainText = !(i % 2);
+                opCode = opCodes[i];
+                isPlainText ?
+                    (opCode && (tree = tree.insert(this.options.trim ? opCode.trim() : opCode))) :
+                    (tree = this._insert(tree, opCode));
             }
 
-            return ret;
-        }
-    });
-
-    Parser.SafeValInstruction = inherit(Parser.ValInstruction, {
-
-        RE_HTML_ESC : /[&<>"'\/]/g,
-        SAFE_HTML_MAP : {
-            '&' : '&amp;',
-            '<' : '&lt;',
-            '>' : '&gt;',
-            '"' : '&quot;',
-            "'" : '&#39;',
-            '/' : '&#x2F;'
+            return tree;
         },
 
-        evaluate : function(){
-            var self = this;
+        _insert : function(parentInstr, expr){
+            var matchExpr = expr.match(Parser.RE_EXPR);
 
-            return Parser.ValInstruction.prototype.evaluate
-                .apply(this, arguments)
-                .replace(this.RE_HTML_ESC, function(ch){
-                    return self.SAFE_HTML_MAP[ch];
-                });
-        }
-    });
-
-    Parser.LoopInstruction = inherit(Instruction, {
-
-        RE_INSTRUCTION_PARTS : /^(\S+?)\s*->\s*([^, ]+)\s*,*\s*(\S+)?$/,
-
-        constructor : function(){
-            var match;
-
-            Instruction.apply(this, arguments);
-            match = this.data.match(this.RE_INSTRUCTION_PARTS);
-
-            if(isNull(match)){
-                throw new Error('syntax error for iteration');
+            if(isNull(matchExpr)){
+                throw new Error('syntax error invalid expr: ' + expr);
             }
 
-            this.source = new Parser.ValInstruction(this.env, match[1]);
-            this.valueName = match[2];
-            this.keyName = match[3];
-        },
-
-        evaluate : function(data){
-            var source = this.source.evaluate(data),
-                len = source.length,
-                ret = '',
-                i;
-
-            for(i = 0; i < len; i += 1){
-                ret += this._fold(this.instructions, this._createNewScope(data, source[i], i));
-            }
-
-            return ret;
-        },
-
-        _createNewScope : function(data, value, index){
-            var nscope = Object.create(data);
-            nscope[this.valueName] = value;
-            !isUndefined(this.keyName) && (nscope[this.keyName] = index);
-            return nscope;
+            return Parser.opApply(parentInstr, matchExpr[1], this.options.env, matchExpr[2]);
         }
-    });
+    };
 
     Parser.opRegister('=', function(parentInstr, env, body){
-        parentInstr.insert(new Parser.ValInstruction(env, body));
+        parentInstr.insert(new ValInstruction(env, body));
         return parentInstr;
     }).opRegister('~', function(parentInstr, env, body){
-        parentInstr.insert(new Parser.SafeValInstruction(env, body));
+        parentInstr.insert(new SafeValInstruction(env, body));
         return parentInstr;
     }).opRegister('?', function(parentInstr, env, body){
-        var instr = new Parser.ConditionalInstruction(env, body);
+        var instr = new ConditionalInstruction(env, body);
         parentInstr.insert(instr);
         return instr;
     }).opRegister('!?', function(parentInstr, env, body){
         parentInstr.setElsePointer();
         return parentInstr;
     }).opRegister('^', function(parentInstr, env, body){
-        var instr = new Parser.LoopInstruction(env, body);
+        var instr = new LoopInstruction(env, body);
         parentInstr.insert(instr);
         return instr;
     }).opRegister('/', function(parentInstr, env, body){
@@ -454,7 +472,7 @@
 
     return {
 
-        version : '1.1.0',
+        version : '1.2.0',
 
         options : {
             tag : /\{{2}(.+?)\}{2}/,

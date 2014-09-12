@@ -104,6 +104,32 @@ describe('birch', function(){
             }), 'test');
         });
 
+        it('check context', function(){
+            assert.equal(birch.compile('{{= @f() }}', {
+                env : {
+                    f : function(){
+                        return this.v;
+                    },
+                    v : 'test'
+                }
+            })(), 'test');
+        });
+
+        it('check nested context', function(){
+            assert.equal(birch.compile('{{= @f().a() }}', {
+                env : {
+                    f : function(){
+                        return {
+                            v : 'test',
+                            a : function(){
+                                return this.v;
+                            }
+                        };
+                    }
+                }
+            })(), 'test');
+        });
+
     });
 
     describe('print', function(){
@@ -189,6 +215,28 @@ describe('birch', function(){
                     ['ok']
                 ]
             }), 'test - ok');
+        });
+
+        it('check context', function(){
+            assert.equal(birch.compile('{{= f() }}')({
+                f : function(){
+                    return this.v;
+                },
+                v : 'test'
+            }), 'test');
+        });
+
+        it('check nested context', function(){
+            assert.equal(birch.compile('{{= f().a() }}')({
+                f : function(){
+                    return {
+                        v : 'test',
+                        a : function(){
+                            return this.v;
+                        }
+                    };
+                }
+            }), 'test');
         });
 
         it('print value with curly brackets', function(){
