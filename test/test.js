@@ -32,7 +32,7 @@ describe('birch', function(){
         });
 
         it('not trim spaces in text', function(){
-            assert.equal(birch.compile('test {{= delim }} ok')({delim : '-'}), 'test-ok');
+            assert.equal(birch.compile('test {{= delim }} ok')({delim : '-'}), 'test - ok');
         });
 
         it('change tag pattern', function(){
@@ -402,7 +402,7 @@ describe('birch', function(){
             assert.equal(birch.compile(tmpl)({
                 c1 : true,
                 c2 : true
-            }), 'v1 v2');
+            }), 'v1 v2 ');
 
             assert.equal(birch.compile(tmpl)({
                 c1 : true,
@@ -430,12 +430,12 @@ describe('birch', function(){
             assert.equal(birch.compile(tmpl)({
                 c1 : true,
                 c2 : true
-            }), 'v1v2');
+            }), 'v1 v2 ');
 
             assert.equal(birch.compile(tmpl)({
                 c1 : true,
                 c2 : false
-            }), 'v1');
+            }), 'v1 ');
 
             assert.equal(birch.compile(tmpl)({
                 c1 : false,
@@ -460,22 +460,22 @@ describe('birch', function(){
             assert.equal(birch.compile(tmpl)({
                 c1 : true,
                 c2 : true
-            }), 'v1v2');
+            }), 'v1 v2 ');
 
             assert.equal(birch.compile(tmpl)({
                 c1 : true,
                 c2 : false
-            }), 'v1!v2');
+            }), 'v1 !v2 ');
 
             assert.equal(birch.compile(tmpl)({
                 c1 : false,
                 c2 : true
-            }), '!v1');
+            }), '!v1 ');
 
             assert.equal(birch.compile(tmpl)({
                 c1 : false,
                 c2 : false
-            }), '!v1');
+            }), '!v1 ');
         });
     });
 
@@ -510,7 +510,7 @@ describe('birch', function(){
 
             assert.equal(birch.compile(tmpl)({
                 arr : [1,2,3]
-            }), '0-1;1-2;2-3;');
+            }), '0 - 1; 1 - 2; 2 - 3; ');
         });
 
         it('iteration only with value', function(){
@@ -518,7 +518,7 @@ describe('birch', function(){
 
             assert.equal(birch.compile(tmpl)({
                 arr : [1,2,3]
-            }), '-1;-2;-3;');
+            }), ' - 1;  - 2;  - 3; ');
         });
 
         it('shadow data value', function(){
@@ -541,7 +541,7 @@ describe('birch', function(){
                     [],
                     ['h']
                 ]
-            }), 'a;b;c;d;e;f;g;h;');
+            }), 'a; b; c; d; e; f; g; h; ');
         });
     });
 
@@ -690,7 +690,7 @@ describe('birch', function(){
                        '{{= i }}.{{= j }}. {{= value }}; ' +
                     '{{/}}' +
                 '{{/}}',
-                cmpl = birch.compile(tpl);
+                cmpl = birch.compile(tpl, {trim : true});
 
             assert.equal(cmpl({
                 items : [

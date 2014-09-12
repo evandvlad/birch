@@ -472,11 +472,11 @@
 
     return {
 
-        version : '1.2.0',
+        version : '1.2.1',
 
         options : {
             tag : /\{{2}(.+?)\}{2}/,
-            trim : true,
+            trim : false,
             env : {}
         },
 
