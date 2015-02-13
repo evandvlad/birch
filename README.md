@@ -15,7 +15,7 @@ Birch - шаблонизатор с предварительной компил�
 #### Производительность ####
 [http://jsperf.com/template-engines-performance-compiling-rendering/4](http://jsperf.com/template-engines-performance-compiling-rendering/4)
 
-#### Синктаксис ####
+#### Синтаксис ####
 
     PRINT_TOKEN = "="
     SAFE_PRINT_TOKEN = "~"
