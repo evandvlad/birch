@@ -9,6 +9,7 @@
 var gulp = require('gulp'),
     mocha = require('gulp-mocha'),
     istanbul = require('gulp-istanbul'),
+    jshint = require('gulp-jshint'),
     codacy = require('gulp-codacy'),
 
     PATH_TO_SRC = './birch.js',
@@ -25,10 +26,17 @@ gulp.task('test.instrument', function(){
         .pipe(istanbul.hookRequire());
 });
 
-gulp.task('test', ['test.instrument'], function(){
+gulp.task('test', ['jshint', 'test.instrument'], function(){
     return gulp.src(PATH_TO_TESTS, {read : false})
         .pipe(mocha())
         .pipe(istanbul.writeReports({dir: PATH_TO_COVERAGE_FOLDER}));
+});
+
+gulp.task('jshint', function(){
+    return gulp.src(PATH_TO_SRC)
+        .pipe(jshint('.jshintrc'))
+        .pipe(jshint.reporter('jshint-stylish'))
+        .pipe(jshint.reporter('fail'));
 });
 
 gulp.task('codacy', function(){

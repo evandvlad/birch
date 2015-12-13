@@ -6,6 +6,8 @@
 
 (function(global, initializer){
 
+    'use strict';
+
     global.birch = initializer();
 
     if(typeof module !== 'undefined' && module.exports){
@@ -75,8 +77,12 @@
         constructor : Instruction,
 
         insert : function(instruction){
-            this._isIObject(instruction) && instruction.setParent(this);
+            if(this._isIObject(instruction)){
+                instruction.setParent(this);
+            }
+
             this.instructions.push(instruction);
+
             return this;
         },
 
@@ -221,7 +227,9 @@
 
 
                 if(parenthesis === 0){
-                    chunk && (result = result.concat(this._parseProps(chunk)));
+                    if(chunk){
+                        result = result.concat(this._parseProps(chunk));
+                    }
                 }
                 else{
                     argsStr += chunk;
@@ -251,9 +259,12 @@
             }
 
             props = propsStr.split('.');
+            len = props.length;
 
-            for(i = 0, len = props.length; i < len; i += 1){
-                props[i] && propsData.push({isMethod : false, value : props[i]});
+            for(i = 0; i < len; i += 1){
+                if(props[i]){
+                    propsData.push({isMethod : false, value : props[i]});
+                }
             }
 
             return propsData;
@@ -271,10 +282,14 @@
             }
 
             args = argsStr.split(',');
+            len = args.length;
 
-            for(i = 0, len = args.length; i < len; i += 1){
+            for(i = 0; i < len; i += 1){
                 arg = args[i].trim();
-                arg && instrs.push(new this.constructor(this.env, arg));
+
+                if(arg){
+                    instrs.push(new this.constructor(this.env, arg));
+                }
             }
 
             return instrs;
@@ -377,8 +392,13 @@
 
         _createNewScope : function(data, value, index){
             var newScope = Object.create(data);
+
             newScope[this.valueName] = value;
-            !isUndefined(this.keyName) && (newScope[this.keyName] = index);
+
+            if(!isUndefined(this.keyName)){
+                newScope[this.keyName] = index;
+            }
+
             return newScope;
         }
     });
@@ -425,14 +445,22 @@
                 len = opCodes.length,
                 isPlainText,
                 opCode,
+                mod,
                 i;
 
             for(i = 0; i < len; i += 1){
-                isPlainText = !(i % 2);
+                mod = i % 2;
+                isPlainText = !mod;
                 opCode = opCodes[i];
-                isPlainText ?
-                    (opCode && (tree = tree.insert(this.options.trim ? opCode.trim() : opCode))) :
-                    (tree = this._insert(tree, opCode));
+
+                if(isPlainText){
+                    if(opCode){
+                        tree = tree.insert(this.options.trim ? opCode.trim() : opCode);
+                    }
+                }
+                else{
+                    tree = this._insert(tree, opCode);
+                }
             }
 
             return tree;
