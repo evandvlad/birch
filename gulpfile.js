@@ -15,7 +15,7 @@ var gulp = require('gulp'),
     PATH_TO_TESTS = './test/**.js',
     PATH_TO_COVERAGE_FOLDER = './coverage',
     PATH_TO_LCOV_FILE = PATH_TO_COVERAGE_FOLDER + '/lcov.info',
-    CODACY_TOKEN = 'faf6c47899e54729bb472b9ae7c729f7';
+    CODACY_TOKEN = 'c65a118dc7434d519cbde3d0cd238916';
 
 gulp.task('test.instrument', function(){
     return gulp.src(PATH_TO_SRC)
