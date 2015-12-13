@@ -1,5 +1,6 @@
 [![Build Status](https://travis-ci.org/evandvlad/birch.svg)](https://travis-ci.org/evandvlad/birch)
 [![Codacy Badge](https://api.codacy.com/project/badge/grade/d48371e18f8d4ee89a31eecc6605e2c0)](https://www.codacy.com/app/evandvlad/birch)
+[![Codacy Badge](https://api.codacy.com/project/badge/coverage/d48371e18f8d4ee89a31eecc6605e2c0)](https://www.codacy.com/app/evandvlad/birch)
 
 Birch - шаблонизатор с предварительной компиляцией шаблонов. В нем не используется вызовы new Function или eval (eval less), 
 поэтому он в первую очередь предназначен для сред где данные конструкции запрещены или нежелательны. Также не предоставляется 
