@@ -486,7 +486,7 @@ Parser.opRegister('=', function(parentInstr, env, body){
     return parentInstr.endInsertion();
 });
 
-module.exports = {
+export default {
 
     options : {
         tag : /\{{2}(.+?)\}{2}/,

@@ -16,9 +16,11 @@ var gulp = require('gulp'),
     uglify = require('gulp-uglify'),
     rename = require('gulp-rename'),
     browserify = require('browserify'),
+    babelify = require('babelify'),
     source = require('vinyl-source-stream'),
     buffer = require('vinyl-buffer'),
     rimraf = require('rimraf'),
+    Instrumenter = require('isparta').Instrumenter,
 
     PATH_TO_SRC = './src/index.js',
     PATH_TO_COVERAGE_FOLDER = './coverage',
@@ -32,6 +34,7 @@ var gulp = require('gulp'),
 gulp.task('test.instrument', function(){
     return gulp.src(PATH_TO_SRC)
         .pipe(istanbul({
+            instrumenter: Instrumenter,
             includeUntested: true
         }))
         .pipe(istanbul.hookRequire());
@@ -61,6 +64,7 @@ gulp.task('build.clean', function(callback){
 
 gulp.task('build.compile', function(){
     return browserify(PATH_TO_SRC, {standalone : 'birch', debug : true})
+        .transform(babelify)
         .bundle()
         .pipe(source(DIST_FILENAME))
         .pipe(buffer())
