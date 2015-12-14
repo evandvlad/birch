@@ -6,32 +6,33 @@
 
 'use strict';
 
-var gulp = require('gulp'),
-    mocha = require('gulp-mocha'),
-    istanbul = require('gulp-istanbul'),
-    jshint = require('gulp-jshint'),
-    sequence = require('gulp-sequence'),
-    codacy = require('gulp-codacy'),
-    sourcemaps = require('gulp-sourcemaps'),
-    uglify = require('gulp-uglify'),
-    rename = require('gulp-rename'),
-    browserify = require('browserify'),
-    babelify = require('babelify'),
-    source = require('vinyl-source-stream'),
-    buffer = require('vinyl-buffer'),
-    rimraf = require('rimraf'),
-    Instrumenter = require('isparta').Instrumenter,
+import gulp from 'gulp';
+import mocha from 'gulp-mocha';
+import istanbul from 'gulp-istanbul';
+import jshint from 'gulp-jshint';
+import sequence from 'gulp-sequence';
+import codacy from 'gulp-codacy';
+import sourcemaps from 'gulp-sourcemaps';
+import uglify from 'gulp-uglify';
+import rename from 'gulp-rename';
+import browserify from 'browserify';
+import babelify from 'babelify';
+import source from 'vinyl-source-stream';
+import buffer from 'vinyl-buffer';
+import rimraf from 'rimraf';
+import {Instrumenter} from 'isparta';
 
-    PATH_TO_SRC = './src/index.js',
-    PATH_TO_COVERAGE_FOLDER = './coverage',
-    PATH_TO_DIST = './dist',
-    DIST_FILENAME = 'birch.js',
-    PATH_TO_LCOV_FILE = PATH_TO_COVERAGE_FOLDER + '/lcov.info',
-    SRC_TEST_RUNNER = './test/src-runner.js',
-    DIST_TEST_RUNNER = './test/dist-runner.js',
-    CODACY_TOKEN = 'c65a118dc7434d519cbde3d0cd238916';
+const PATH_TO_SRC = './src/**/*.js';
+const PATH_TO_SRC_INDEX_FILE = './src/index.js';
+const PATH_TO_COVERAGE_FOLDER = './coverage';
+const PATH_TO_DIST = './dist';
+const DIST_FILENAME = 'birch.js';
+const PATH_TO_LCOV_FILE = PATH_TO_COVERAGE_FOLDER + '/lcov.info';
+const SRC_TEST_RUNNER = './test/src-runner.js';
+const DIST_TEST_RUNNER = './test/dist-runner.js';
+const CODACY_TOKEN = 'c65a118dc7434d519cbde3d0cd238916';
 
-gulp.task('test.instrument', function(){
+gulp.task('test.instrument', () => {
     return gulp.src(PATH_TO_SRC)
         .pipe(istanbul({
             instrumenter: Instrumenter,
@@ -40,30 +41,30 @@ gulp.task('test.instrument', function(){
         .pipe(istanbul.hookRequire());
 });
 
-gulp.task('test', ['jshint', 'test.instrument'], function(){
+gulp.task('test', ['jshint', 'test.instrument'], () => {
     return gulp.src(SRC_TEST_RUNNER, {read : false})
         .pipe(mocha())
         .pipe(istanbul.writeReports({dir: PATH_TO_COVERAGE_FOLDER}));
 });
 
-gulp.task('dist-verification', function(){
+gulp.task('dist-verification', () => {
     return gulp.src(DIST_TEST_RUNNER, {read: false})
         .pipe(mocha());
 });
 
-gulp.task('jshint', function(){
+gulp.task('jshint', () => {
     return gulp.src(PATH_TO_SRC)
         .pipe(jshint('.jshintrc'))
         .pipe(jshint.reporter('jshint-stylish'))
         .pipe(jshint.reporter('fail'));
 });
 
-gulp.task('build.clean', function(callback){
+gulp.task('build.clean', (callback) => {
     rimraf(PATH_TO_DIST, callback);
 });
 
-gulp.task('build.compile', function(){
-    return browserify(PATH_TO_SRC, {standalone : 'birch', debug : true})
+gulp.task('build.compile', () => {
+    return browserify(PATH_TO_SRC_INDEX_FILE, {standalone : 'birch', debug : true})
         .transform(babelify)
         .bundle()
         .pipe(source(DIST_FILENAME))
@@ -73,7 +74,7 @@ gulp.task('build.compile', function(){
         .pipe(gulp.dest(PATH_TO_DIST));
 });
 
-gulp.task('build.minify', function(){
+gulp.task('build.minify', () => {
     return gulp.src(PATH_TO_DIST + '/' + DIST_FILENAME)
         .pipe(sourcemaps.init({loadMaps: true}))
         .pipe(uglify())
@@ -84,7 +85,7 @@ gulp.task('build.minify', function(){
 
 gulp.task('build', sequence('build.clean', 'build.compile', 'build.minify'));
 
-gulp.task('codacy', function(){
+gulp.task('codacy', () => {
     return gulp.src(PATH_TO_LCOV_FILE)
         .pipe(codacy({token : CODACY_TOKEN}));
 });
