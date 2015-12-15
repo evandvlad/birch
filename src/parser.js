@@ -6,14 +6,14 @@
 
 'use strict';
 
-import instructionManager from './instructions-manager';
-
 const RE_EXPR = /^(\S+)\s*(.*?)\s*$/;
 const RE_SPACES = /[\r\t\n]+/g;
+const SPACES_REPLACER = ' ';
 
 export default class {
 
-    constructor(pattern, options){
+    constructor(instructor, pattern, options){
+        this._instructor = instructor;
         this._options = options;
         this._tree = this._parse(pattern);
     }
@@ -23,39 +23,31 @@ export default class {
     }
 
     _parse(template){
-        var opCodes = template.replace(RE_SPACES, ' ').split(this._options.tag),
-            tree = instructionManager.createWrapperInstruction(this._options.env),
-            len = opCodes.length,
-            isPlainText,
-            opCode,
-            mod,
-            i;
+        let templateParts = template.replace(RE_SPACES, SPACES_REPLACER).split(this._options.tag),
+            root = this._instructor.createRootInstruction(this._options.env);
 
-        for(i = 0; i < len; i += 1){
-            mod = i % 2;
-            isPlainText = !mod;
-            opCode = opCodes[i];
+        return templateParts.reduce((tree, part, indx) => {
+            let mod2 = indx % 2,
+                isTerminal = !mod2;
 
-            if(isPlainText){
-                if(opCode){
-                    tree = tree.insert(this._options.trim ? opCode.trim() : opCode);
-                }
+            if(isTerminal){
+                part = this._options.trim ? part.trim() : part;
+                return part !== '' ? tree.insert(part) : tree;
             }
-            else{
-                tree = this._insert(tree, opCode);
-            }
-        }
 
-        return tree;
+            return this._insert(tree, part);
+        }, root);
     }
 
-    _insert(parentInstr, expr){
-        var matchExpr = expr.match(RE_EXPR);
+    _insert(parentInstruction, expr){
+        let exprMatch = expr.match(RE_EXPR);
 
-        if(matchExpr === null){
-            throw new Error('syntax error invalid expr: ' + expr);
+        if(exprMatch === null){
+            throw new Error(`syntax error invalid expr: ${expr}`);
         }
 
-        return instructionManager.applyOperation(parentInstr, matchExpr[1], this._options.env, matchExpr[2]);
+        let [, token, body] = exprMatch;
+
+        return this._instructor.applyInstruction(parentInstruction, token, this._options.env, body);
     }
 }

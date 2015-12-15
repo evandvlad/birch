@@ -6,8 +6,9 @@
 
 'use strict';
 
-import Parser from './parser.js';
-import ext from './libs/ext';
+import Parser from './parser';
+import instructor from './instructor';
+import std from './libs/std';
 
 export default {
 
@@ -18,7 +19,7 @@ export default {
     },
 
     compile(pattern, options = {}){
-        let parser = new Parser(pattern, ext.extend(this.options, options));
+        let parser = new Parser(instructor, pattern, std.extend(this.options, options));
         return (data = {}) => parser.translate(data);
     }
 };

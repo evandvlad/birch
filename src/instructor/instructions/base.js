@@ -15,8 +15,12 @@ export default class {
         this._instructions = [];
     }
 
+    static isInstruction(instr){
+        return instr && typeof instr.evaluate === 'function';
+    }
+
     insert(instruction){
-        if(this._isIObject(instruction)){
+        if(this.constructor.isInstruction(instruction)){
             instruction.setParent(this);
         }
 
@@ -38,21 +42,7 @@ export default class {
         return this._fold(this._instructions, data);
     }
 
-    _isIObject(instr){
-        return instr && typeof instr.evaluate === 'function';
-    }
-
     _fold(instrs, data){
-        let len = instrs.length,
-            result = '',
-            instr,
-            i;
-
-        for(i = 0; i < len; i += 1){
-            instr = instrs[i];
-            result += this._isIObject(instr) ? instr.evaluate(data) : instr;
-        }
-
-        return result;
+        return instrs.reduce((acc, instr) => acc + (this.constructor.isInstruction(instr) ? instr.evaluate(data) : instr), '');
     }
 }

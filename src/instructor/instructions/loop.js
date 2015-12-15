@@ -22,22 +22,17 @@ export default class extends BaseInstruction {
             throw new Error('syntax error for iteration');
         }
 
-        this._list = new ValInstruction(this._env, matchExpr[1]);
-        this._valueName = matchExpr[2];
-        this._keyName = matchExpr[3];
+        let [, list, valueName, keyName] = matchExpr;
+
+        this._list = new ValInstruction(this._env, list);
+        this._valueName = valueName;
+        this._keyName = keyName;
     }
 
     evaluate(data){
-        let list = this._list.evaluate(data),
-            len = list.length,
-            result = '',
-            i;
-
-        for(i = 0; i < len; i += 1){
-            result += this._fold(this._instructions, this._createNewScope(data, list[i], i));
-        }
-
-        return result;
+        return this._list.evaluate(data).reduce((acc, iter, indx) => {
+            return acc + this._fold(this._instructions, this._createNewScope(data, iter, indx));
+        }, '');
     }
 
     _createNewScope(data, value, index){
