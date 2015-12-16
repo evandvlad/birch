@@ -19,7 +19,7 @@ export default class extends BaseInstruction {
         let matchExpr = this._data.match(RE_INSTRUCTION_PARTS);
 
         if(matchExpr === null){
-            throw new Error('syntax error for iteration');
+            throw new Error(`birch error: incorrect syntax for iteration in expression "${this._data}"`);
         }
 
         let [, list, valueName, keyName] = matchExpr;

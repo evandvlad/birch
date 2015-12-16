@@ -52,7 +52,7 @@ export default {
 
     applyInstruction(parentInstruction, token, env, body){
         if(!this._tokenHandlers[token]){
-            throw new Error(`operation: "${token}" not found`);
+            throw new Error(`birch error: incorrect operation "${token}"`);
         }
 
         return this._tokenHandlers[token](parentInstruction, env, body);

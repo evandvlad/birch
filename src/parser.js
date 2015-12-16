@@ -43,7 +43,7 @@ export default class {
         let exprMatch = expr.match(RE_EXPR);
 
         if(exprMatch === null){
-            throw new Error(`syntax error invalid expr: ${expr}`);
+            throw new Error(`birch error: invalid expression "${expr}"`);
         }
 
         let [, token, body] = exprMatch;

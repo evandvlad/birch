@@ -23,13 +23,13 @@ module.exports = {
                 it('exception if token was not found', function(){
                     assert.throws(function(){
                         birch.compile('{{=!==}}')({});
-                    });
+                    }, /birch error: incorrect operation "=!=="/);
                 });
 
                 it('exception if incorrect operation', function(){
                     assert.throws(function(){
                         birch.compile('{{@ a }}')({});
-                    });
+                    }, /birch error: incorrect operation "@"/);
                 });
 
                 it('ignore empty scope', function(){
@@ -47,9 +47,21 @@ module.exports = {
                 });
 
                 it('don\'t trim', function(){
-                    assert.equal(birch.compile('{{= value }} {{= value }} {{= value}}', {trim : false})({
+                    assert.equal(birch.compile(' {{= value }} {{= value }} {{= value}} ')({
                         value: 'test'
-                    }), 'test test test');
+                    }), ' test test test ');
+                });
+
+                it('trim', function(){
+                    assert.equal(birch.compile(' {{= value }} {{= value }} {{= value}} ', {trim : true})({
+                        value: 'test'
+                    }), 'testtesttest');
+                });
+
+                it('exception when incorrect operation syntax', function(){
+                    assert.throws(function(){
+                        birch.compile('{{ a}}');
+                    }, /birch error: invalid expression " a"/);
                 });
             });
 
@@ -142,7 +154,7 @@ module.exports = {
                 it('empty instruction exception', function(){
                     assert.throws(function(){
                         birch.compile('{{=}}')({});
-                    });
+                    }, /birch error: value is empty/);
                 });
 
                 it('atom', function(){
@@ -321,7 +333,7 @@ module.exports = {
                 it('empty instruction exception', function(){
                     assert.throws(function(){
                         birch.compile('{{~}}')({});
-                    });
+                    }, /birch error: value is empty/);
                 });
 
                 it('escape', function(){
@@ -547,6 +559,14 @@ module.exports = {
                             ['h']
                         ]
                     }), 'a; b; c; d; e; f; g; h; ');
+                });
+
+                it('expeption for incorrect syntax', function(){
+                    var tmpl = '{{^ items -> }}{{= value }}; {{/}}';
+
+                    assert.throws(function(){
+                        birch.compile(tmpl);
+                    }, /birch error: incorrect syntax for iteration in expression "items ->"/);
                 });
             });
         });
