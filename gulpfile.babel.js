@@ -15,12 +15,14 @@ import codacy from 'gulp-codacy';
 import sourcemaps from 'gulp-sourcemaps';
 import uglify from 'gulp-uglify';
 import rename from 'gulp-rename';
+import header from 'gulp-header';
 import browserify from 'browserify';
 import babelify from 'babelify';
 import source from 'vinyl-source-stream';
 import buffer from 'vinyl-buffer';
 import rimraf from 'rimraf';
 import {Instrumenter} from 'isparta';
+import pkg from './package.json';
 
 const PATH_TO_SRC = './src/**/*.js';
 const PATH_TO_SRC_INDEX_FILE = './src/index.js';
@@ -30,6 +32,7 @@ const DIST_FILENAME = 'birch.js';
 const PATH_TO_LCOV_FILE = PATH_TO_COVERAGE_FOLDER + '/lcov.info';
 const SRC_TEST_RUNNER = './test/src-runner.js';
 const DIST_TEST_RUNNER = './test/dist-runner.js';
+
 const CODACY_TOKEN = 'c65a118dc7434d519cbde3d0cd238916';
 
 gulp.task('test.instrument', () => {
@@ -83,7 +86,16 @@ gulp.task('build.minify', () => {
         .pipe(gulp.dest(PATH_TO_DIST));
 });
 
-gulp.task('build', sequence('build.clean', 'build.compile', 'build.minify'));
+gulp.task('build.version', () => {
+    return gulp.src(PATH_TO_DIST + '/*.js')
+        .pipe(header(
+            '// version: <%= version %>, timestamp: <%= timestamp %>\n\n',
+            {version : pkg.version, timestamp : Date.now()})
+        )
+        .pipe(gulp.dest(PATH_TO_DIST));
+});
+
+gulp.task('build', sequence('build.clean', 'build.compile', 'build.minify', 'build.version'));
 
 gulp.task('codacy', () => {
     return gulp.src(PATH_TO_LCOV_FILE)
