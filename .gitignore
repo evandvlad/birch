@@ -1,4 +1,4 @@
-*.idea
-node_modules
+/.vimrc
+/node_modules
 coverage
 dist
