@@ -10,16 +10,21 @@ import Parser from './parser';
 import instructor from './instructor';
 import std from './libs/std';
 
-export default {
-
-    options : {
-        tag : /\{{2}(.+?)\}{2}/,
-        trim : false,
-        env : {}
-    },
-
-    compile(pattern, options = {}){
-        let parser = new Parser(instructor, pattern, std.extend(this.options, options));
-        return (data = {}) => parser.translate(data);
-    }
+const defaultOptions = {
+    tag : /\{{2}(.+?)\}{2}/,
+    trim : false,
+    env : {}
 };
+    
+export default function(options = {}){
+     
+    let opts = std.extend(defaultOptions, options);
+
+    return {
+
+        compile(pattern){
+            let parser = new Parser(instructor, pattern, opts);
+            return (data = {}) => parser.translate(data);
+        }
+    };
+}

@@ -33,6 +33,8 @@ const PATH_TO_LCOV_FILE = PATH_TO_COVERAGE_FOLDER + '/lcov.info';
 const SRC_TEST_RUNNER = './test/src-runner.js';
 const DIST_TEST_RUNNER = './test/dist-runner.js';
 
+const BROWSERIFY_STANDALONE_NAME = 'Birch';
+
 const CODACY_TOKEN = 'c65a118dc7434d519cbde3d0cd238916';
 
 gulp.task('test.instrument', () => {
@@ -46,13 +48,13 @@ gulp.task('test.instrument', () => {
 
 gulp.task('test', ['jshint', 'test.instrument'], () => {
     return gulp.src(SRC_TEST_RUNNER, {read : false})
-        .pipe(mocha())
+        .pipe(mocha({reporter : 'tap'}))
         .pipe(istanbul.writeReports({dir: PATH_TO_COVERAGE_FOLDER}));
 });
 
 gulp.task('dist-verification', () => {
     return gulp.src(DIST_TEST_RUNNER, {read: false})
-        .pipe(mocha());
+        .pipe(mocha({reporter : 'tap'}));
 });
 
 gulp.task('jshint', () => {
@@ -67,7 +69,7 @@ gulp.task('build.clean', (callback) => {
 });
 
 gulp.task('build.compile', () => {
-    return browserify(PATH_TO_SRC_INDEX_FILE, {standalone : 'birch', debug : true})
+    return browserify(PATH_TO_SRC_INDEX_FILE, {standalone : BROWSERIFY_STANDALONE_NAME, debug : true})
         .transform(babelify)
         .bundle()
         .pipe(source(DIST_FILENAME))

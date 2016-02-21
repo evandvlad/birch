@@ -8,10 +8,10 @@
 
 var tests = require('./spec/birch'),
     examples = require('./spec/examples'),
-    birch = require('../dist/birch'),
-    birchMin = require('../dist/birch.min');
+    Birch = require('../dist/birch'),
+    BirchMin = require('../dist/birch.min');
 
-tests.run(birch);
-tests.run(birchMin);
+tests.run(Birch);
+tests.run(BirchMin);
 
-examples.run(birchMin);
+examples.run(BirchMin);

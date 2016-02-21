@@ -7,6 +7,6 @@
 'use strict';
 
 var tests = require('./spec/birch'),
-    birch = require('../src');
+    Birch = require('../src');
 
-tests.run(birch);
+tests.run(Birch);
