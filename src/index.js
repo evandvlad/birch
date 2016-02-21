@@ -18,7 +18,7 @@ const defaultOptions = {
     
 export default function(options = {}){
      
-    let opts = std.extend(defaultOptions, options);
+    const opts = std.extend(defaultOptions, options);
 
     return {
 
